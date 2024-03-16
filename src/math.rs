@@ -1,4 +1,3 @@
-
 /// 2-component vector representation structure
 #[derive(Copy, Clone, Debug)]
 pub struct Vec2<T> {
@@ -12,4 +11,11 @@ impl<T: std::fmt::Display> std::fmt::Display for Vec2<T> {
     }
 } // impl std::fmt::Display for Vec2
 
+#[derive(Copy, Clone, Debug)]
+pub struct Ext2<T> {
+    pub width: T,
+    pub height: T,
+}
+
 pub type Vec2f = Vec2<f32>;
+pub type Ext2zu = Vec2<f32>;

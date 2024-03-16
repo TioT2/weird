@@ -3,123 +3,17 @@ pub mod timer;
 pub mod input;
 pub mod math;
 pub mod camera;
+pub mod map;
+pub mod font;
+pub mod surface;
 
-
+use font::Font;
+use map::*;
 use math::*;
+use surface::Surface;
 use camera::Camera;
 
-use std::collections::HashSet;
 use input::KeyCode;
-use util::unordered_pair::UnorderedPair;
-
-/// Sector edge representation structure
-#[derive(Copy, Clone, Debug, PartialEq)]
-enum EdgeType {
-    /// Wall
-    Wall,
-    /// Portal to some sector
-    Portal(SectorId),
-} // enum Edge
-
-#[derive(Copy, Clone, Debug)]
-struct Edge {
-    pub p0: Vec2f,
-    pub p1: Vec2f,
-    pub d: Vec2f,
-    pub d_cross_p0: f32,
-}
-
-impl std::fmt::Display for EdgeType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Wall => f.write_str("Wall"),
-            Self::Portal(portal) => f.write_fmt(format_args!("Portal({})", portal.as_u32()))
-        }
-    } // fn fmt
-} // impl std::fmt::Display for Edge
-
-/// Sector representation structure
-struct Sector {
-    pub points: Vec<Vec2f>,
-    pub edge_types: Vec<EdgeType>,
-    pub edges: Vec<Edge>,
-    pub floor: f32,
-    pub ceiling: f32,
-} // struct Sector
-
-impl Sector {
-    /// Sector with loop of walls representation structure
-    pub fn wall_loop(points: &[Vec2f]) -> Self {
-        let mut sector = Self {
-            points: points.into(),
-            edge_types: {
-                let mut edges = Vec::<EdgeType>::with_capacity(points.len());
-                edges.resize(points.len(), EdgeType::Wall);
-                edges
-            },
-            edges: Vec::new(),
-            floor: 0.0,
-            ceiling: 1.0,
-        };
-        sector.edges = sector.build_edges();
-        sector
-    } // fn wall_loop
-
-    pub fn build_edges(&self) -> Vec<Edge> {
-        let mut edge_lines = Vec::<Edge>::with_capacity(self.points.len());
-
-        for (left, right) in self.points.iter().zip({
-            let pit = self.points.iter();
-            let mut pit = pit.cycle();
-            pit.next();
-            pit
-        }) {
-            let d = Vec2f {
-                x: right.x - left.x,
-                y: right.y - left.y,
-            };
-
-            edge_lines.push(Edge {
-                p0: *left,
-                p1: *right,
-                d_cross_p0: d.x * left.y - d.y * left.x,
-                d,
-            });
-        }
-
-        edge_lines
-    }
-
-    /// Check for point being located in sector
-    pub fn contains(&self, point: Vec2f) -> bool {
-        let mut sign_collector: u8 = 0;
-
-        for line in &self.edges {
-            let coef = line.d.x * point.y - line.d.y * point.x - line.d_cross_p0;
-
-            unsafe {
-                sign_collector |= 1 << (std::mem::transmute::<f32, u32>(coef) >> 31);
-            }
-        }
-
-        unsafe {
-            std::mem::transmute::<u8, bool>(sign_collector ^ (sign_collector >> 1))
-        }
-    } // pub fn is_in
-}
-
-impl std::fmt::Display for Sector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "\
-            points: {:?}\n\
-            edges: {:?}\n\
-            bounds: [{}; {}]\n\
-            ",
-            self.points, self.edge_types, self.floor, self.ceiling,
-        ))
-    }
-}
 
 /// Projection information representation structure
 pub struct ProjectionInfo {
@@ -127,243 +21,18 @@ pub struct ProjectionInfo {
     pub projection_height: f32,
 }
 
-/// Map representation structure
-struct Map {
-    sectors: Vec<Sector>,
-    pub camera_location: Vec2f,
-    pub camera_rotation: f32,
-} // struct Map
-
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
-struct SectorId(u32);
-
-impl SectorId {
-    pub fn new(index: u32) -> Self {
-        Self(index)
-    }
-
-    pub fn as_u32(self) -> u32 {
-        self.0
-    }
-}
-
-impl Map {
-    pub fn find_sector(&self, location: Vec2f) -> Option<SectorId> {
-        self.sectors
-            .iter()
-            .enumerate()
-            .find(|(_, sector)| sector.contains(location))
-            .map(|(index, _)| SectorId::new(index as u32))
-    }
-
-    pub fn get_sector(&self, id: SectorId) -> Option<&Sector> {
-        self.sectors.get(id.as_u32() as usize)
-    }
-}
-
-/// Map loading error representation structure
-#[derive(Debug)]
-enum WmtLoadingError {
-    NumberParsingError,
-    UnknownLineType(String),
-    InvalidPointIndex(u32),
-    NotEnoughPointCoordinates,
-    NotEnoughCameraParameters,
-    NotEnoughSectorVertices,
-    NoAdjointSectorForPortal {
-        from_sector: u32,
-        by_indices: (u32, u32),
-    },
-    InvalidSectorBounds {
-        floor: f32,
-        ceiling: f32
-    },
-    Other(String),
-} // enum WmtLoadingError
-
-impl Map {
-    /// Map from .wmt file loading function
-    /// * `source` - file text
-    /// * Returns valid Map or WmtLoadingError
-    pub fn load_from_wmt(source: &str) -> Result<Map, WmtLoadingError> {
-        struct SectorData {
-            pub point_indices: Vec<u32>,
-            pub floor: f32,
-            pub ceiling: f32,
-            pub walls: HashSet<UnorderedPair<u32>>,
-        }
-        let mut points = Vec::<Vec2f>::new();
-        let mut walls = HashSet::<UnorderedPair<u32>>::new();
-        let mut sectors = Vec::<SectorData>::new();
-        let mut camera_location = Vec2f {
-            x: 0.0,
-            y: 0.0,
-        };
-        let mut camera_rotation = 0.0;
-
-        // Parse file data
-        for line in source.lines().map(|line| line.trim()) {
-            let mut elem = line.split(' ');
-
-            let line_type = match elem.next() {
-                Some(s) => s,
-                None => continue,
-            };
-
-            match line_type {
-                // Comment | Empty line
-                "#" | "" => {}
-
-                // Point
-                "p" | "point" => {
-                    let (sx, sy) = elem.next().zip(elem.next()).ok_or(WmtLoadingError::NotEnoughPointCoordinates)?;
-                    let (x, y) = sx.parse::<f32>().ok().zip(sy.parse::<f32>().ok()).ok_or(WmtLoadingError::NumberParsingError)?;
-
-                    points.push(Vec2f { x, y });
-                }
-
-                // Wall
-                "w" | "wall" => {
-                    let (sx, sy) = elem.next()
-                        .zip(elem.next())
-                        .ok_or(WmtLoadingError::NotEnoughPointCoordinates)?;
-
-                    walls.insert(sx.parse::<u32>().ok()
-                        .zip(sy.parse::<u32>().ok())
-                        .ok_or(WmtLoadingError::NumberParsingError)?
-                        .into()
-                    );
-                }
-
-                // Sector
-                "s" | "sector" => {
-                    let (sx, sy) = elem.next().zip(elem.next()).ok_or(WmtLoadingError::NotEnoughPointCoordinates)?;
-                    let (floor, ceiling) = sx.parse::<f32>().ok().zip(sy.parse::<f32>().ok()).ok_or(WmtLoadingError::NumberParsingError)?;
-
-                    let point_indices: Vec<u32> = elem
-                        .map(|index_str| index_str.parse::<u32>().ok())
-                        .collect::<Option<Vec<u32>>>().ok_or(WmtLoadingError::NumberParsingError)?;
-
-                    if point_indices.len() < 3 {
-                        return Err(WmtLoadingError::NotEnoughSectorVertices);
-                    }
-
-                    let walls = point_indices.iter()
-                        .zip({
-                            let mut iter = point_indices.iter().cycle();
-                            iter.next();
-                            iter
-                        })
-                        .map(|(first, second)| {
-                            UnorderedPair::new(*first, *second)
-                        })
-                        .collect::<HashSet<UnorderedPair<u32>>>();
-
-                    sectors.push(SectorData { point_indices, floor, ceiling, walls });
-                }
-
-                "c" | "camera" => {
-                    let ((scx, scy), sca) = elem.next().zip(elem.next()).zip(elem.next()).ok_or(WmtLoadingError::NotEnoughCameraParameters)?;
-                    ((camera_location.x, camera_location.y), camera_rotation) = scx.parse::<f32>().ok()
-                        .zip(scy.parse::<f32>().ok())
-                        .zip(sca.parse::<f32>().ok())
-                        .ok_or(WmtLoadingError::NumberParsingError)?;
-                }
-
-                _ => return Err(WmtLoadingError::UnknownLineType(line_type.to_string()))
-            }
-        }
-
-        // Parse data parsed from file
-        let sectors = sectors.iter()
-            .enumerate()
-            .map(|(sector_index, sector)| -> Result<Sector, WmtLoadingError> {
-                let points = sector.point_indices.iter()
-                    .map(|index| points
-                        .get(*index as usize)
-                        .map(|v| *v)
-                        .ok_or(WmtLoadingError::InvalidPointIndex(*index))
-                    )
-                    .collect::<Result<Vec<Vec2f>, WmtLoadingError>>()?;
-
-                let edges = sector.point_indices.iter()
-                    .zip({
-                        let mut iter = sector.point_indices.iter().cycle();
-                        iter.next();
-                        iter
-                    })
-                    .map(|(first, second)| {
-                        let pair = UnorderedPair::new(*first, *second);
-
-                        // Find adjoint sector
-                        if walls.contains(&pair) {
-                            Ok(EdgeType::Wall)
-                        } else {
-                            let adjoint = sectors.iter()
-                                .enumerate()
-                                .find(|(index, sector)| *index != sector_index && sector.walls.contains(&pair))
-                                .map(|(index, _)| index as u32)
-                                .ok_or(WmtLoadingError::NoAdjointSectorForPortal {
-                                    from_sector: sector_index as u32,
-                                    by_indices: pair.into()
-                                })?;
-
-                            Ok(EdgeType::Portal(SectorId::new(adjoint)))
-                        }
-                    })
-                    .collect::<Result<Vec<EdgeType>, WmtLoadingError>>()?;
-
-                // Validate sector bounds
-                if sector.floor > sector.ceiling {
-                    return Err(WmtLoadingError::InvalidSectorBounds { floor: sector.floor, ceiling: sector.ceiling })
-                }
-
-                let mut sector = Sector {
-                    points,
-                    edge_types: edges,
-                    edges: Vec::new(),
-                    floor: sector.floor,
-                    ceiling: sector.ceiling,
-                };
-                sector.edges = sector.build_edges();
-
-                Ok(sector)
-            })
-            .collect::<Result<Vec<Sector>, WmtLoadingError>>()?;
-
-        Ok(Map { sectors, camera_location, camera_rotation })
-    } // fn load_from_wmt
-} // impl Map
-
-struct Frustum {
-    pub x0: u32,
-    pub y0_min: u32,
-    pub y0_max: u32,
-
-    pub x1: u32,
-    pub y1_min: u32,
-    pub y1_max: u32,
-}
-
-#[derive(Copy, Clone)]
-struct Surface {
-    data: *mut u32,
-    width: usize,
-    height: usize,
-}
-
 /// Renderer representation structure
 struct Render {
 } // struct Render
 
-struct SectorRenderContext<'a> {
+struct RenderContext<'a> {
     surface: &'a Surface,
     map: &'a Map,
     camera: &'a Camera,
     visit_stack: std::collections::VecDeque<SectorId>,
-    floor_buffer: Vec<usize>,
-    ceil_buffer: Vec<usize>,
-    inv_depth_buffer: Vec<f32>,
+    floor_buffer: &'a mut [usize],
+    ceil_buffer: &'a mut [usize],
+    inv_depth_buffer: &'a mut [f32],
 }
 
 impl Render {
@@ -374,8 +43,8 @@ impl Render {
     }
 
     pub unsafe fn draw_bar_unchecked(&self, surface: &Surface, x0: usize, y0: usize, x1: usize, y1: usize, color: u32) {
-        let mut yptr = surface.data.add(y0 * surface.width + x0);
-        let yeptr = yptr.add((y1 - y0) * surface.width);
+        let mut yptr = surface.data.add(y0 * surface.stride + x0);
+        let yeptr = yptr.add((y1 - y0) * surface.stride);
         let dx = x1 - x0;
 
         while yptr != yeptr {
@@ -387,7 +56,7 @@ impl Render {
                 xptr = xptr.add(1);
             }
 
-            yptr = yptr.add(surface.width);
+            yptr = yptr.add(surface.stride);
         }
     }
 
@@ -489,9 +158,9 @@ impl Render {
         let surface = *surface;
 
         let (mut dy, sy): (usize, usize) = if y1 < y0 {
-            (y0 - y1, surface.width.wrapping_neg())
+            (y0 - y1, surface.stride.wrapping_neg())
         } else {
-            (y1 - y0, surface.width)
+            (y1 - y0, surface.stride)
         };
         let (mut dx, sx): (usize, usize) = if x1 < x0 {
             (x0 - x1, 1usize.wrapping_neg())
@@ -499,7 +168,7 @@ impl Render {
             (x1 - x0, 1usize)
         };
 
-        let mut pptr = surface.data.wrapping_add(y0 * surface.width + x0);
+        let mut pptr = surface.data.wrapping_add(y0 * surface.stride + x0);
         pptr.write(color);
 
         if dx >= dy {
@@ -538,7 +207,7 @@ impl Render {
         }
     }
 
-    fn render_sector(context: &mut SectorRenderContext, sector_id: SectorId, screen_x_begin: usize, screen_x_end: usize) {
+    fn render_sector(context: &mut RenderContext, sector_id: SectorId, screen_x_begin: usize, screen_x_end: usize) {
         let sector = match context.map.get_sector(sector_id) {
             Some(sector) => sector,
             None => return,
@@ -557,6 +226,7 @@ impl Render {
             // Check for x or y visibility and clamp'em if not
             if p0.y <= 0.0 {
                 if p1.y <= 0.0 {
+                    // Clip edge if totally invisible
                     continue 'edge_loop;
                 } else {
                     p0 = Vec2f {
@@ -573,7 +243,7 @@ impl Render {
 
 
             let to_screen_x = |p: Vec2f| -> isize {
-                (((p.x / p.y) + 1.0) / 2.0 * context.surface.width as f32) as isize
+                ((p.x / p.y / 2.0 + 0.5) * context.surface.width as f32) as isize
             };
 
 
@@ -632,10 +302,10 @@ impl Render {
                     let floor_y = context.surface.height / 2 + y;
 
                     let pbegin = context.surface.data.add(x);
-                    let mut pptr = pbegin.add(context.surface.width * *buf_ceil);
-                    let pceil = pbegin.add(context.surface.width * ceil_y);
-                    let pfloor = pbegin.add(context.surface.width * floor_y);
-                    let pend = pbegin.add(context.surface.width * *buf_floor);
+                    let mut pptr = pbegin.add(context.surface.stride * *buf_ceil);
+                    let pceil = pbegin.add(context.surface.stride * ceil_y);
+                    let pfloor = pbegin.add(context.surface.stride * floor_y);
+                    let pend = pbegin.add(context.surface.stride * *buf_floor);
 
                     *buf_floor = floor_y;
                     *buf_ceil = ceil_y;
@@ -643,7 +313,7 @@ impl Render {
 
                     while pptr < pceil {
                         *pptr = 0xDDDDDD;
-                        pptr = pptr.add(context.surface.width);
+                        pptr = pptr.add(context.surface.stride);
                     }
 
                     if is_portal {
@@ -651,13 +321,13 @@ impl Render {
                     } else {
                         while pptr < pfloor {
                             *pptr = color;
-                            pptr = pptr.add(context.surface.width);
+                            pptr = pptr.add(context.surface.stride);
                         }
                     }
 
                     while pptr < pend {
                         *pptr = floor_color;
-                        pptr = pptr.add(context.surface.width);
+                        pptr = pptr.add(context.surface.stride);
                     }
                 }
             }
@@ -672,29 +342,31 @@ impl Render {
                 context.visit_stack.pop_back();
             };
         } // 'edge_loop
-    }
+    } // fn render_sector
 
     /// Next frame rendering function
     /// `surface` - surface to render frame to
     /// `map` - map to render
-    pub fn render(&mut self, surface: &Surface, map: &Map, camera: &Camera) {
-        if let Some(sector_id) = map.find_sector(camera.location) {
-            let mut context = SectorRenderContext {
+    /// `sector_id` - id of sector to start rendering from
+    pub fn render(&mut self, surface: &Surface, map: &Map, camera: &Camera, sector_id: SectorId) {
+        // Render only if sector actually exists
+        if map.get_sector(sector_id).is_some() {
+            let mut context = RenderContext {
                 surface,
                 map,
                 camera,
                 visit_stack: std::collections::VecDeque::new(),
-                floor_buffer: {
+                floor_buffer: &mut {
                     let mut buffer = Vec::with_capacity(surface.width);
                     buffer.resize(surface.width, surface.height);
                     buffer
                 },
-                ceil_buffer: {
+                ceil_buffer: &mut {
                     let mut buffer = Vec::with_capacity(surface.width);
                     buffer.resize(surface.width, 0);
                     buffer
                 },
-                inv_depth_buffer: {
+                inv_depth_buffer: &mut {
                     let mut buffer = Vec::with_capacity(surface.width);
                     buffer.resize(surface.width, 0.0);
                     buffer
@@ -708,8 +380,12 @@ impl Render {
     /// Next frame rendering function
     /// `surface` - surface to render frame to
     /// `map` - map to render
-    pub fn render_minimap(&mut self, surface: &Surface, map: &Map, camera: &Camera) {
-        let draw_sector = |sector: &Sector| {
+    pub fn render_minimap(&mut self, surface: &Surface, map: &Map, camera: &Camera, camera_sector: SectorId) {
+        unsafe {
+            self.draw_bar_unchecked(surface, 0, 0, surface.width, surface.height, 0x000000);
+        }
+
+        let render_sector = |sector: &Sector, color_scale: u32| {
             for (edge, edge_type) in sector.edges.iter().zip(sector.edge_types.iter()) {
                 // Calculate edge projection
                 let p0 = camera.to_space(edge.p0);
@@ -717,33 +393,39 @@ impl Render {
 
                 // Project edge to pixel space and render, actually
                 let edge_color = match edge_type {
-                    EdgeType::Wall => 0x00FF00,
-                    EdgeType::Portal(_) => 0xFF0000,
-                };
+                    EdgeType::Wall => 0x001100,
+                    EdgeType::Portal(_) => 0x110000,
+                } * color_scale;
 
                 /*unsafe*/ {
                     self.draw_line(surface,
-                        (p0.x * 30.0) as isize + surface.width  as isize / 2,
-                        (-p0.y * 30.0) as isize + surface.height as isize / 2,
-                        (p1.x * 30.0) as isize + surface.width  as isize / 2,
-                        (-p1.y * 30.0) as isize + surface.height as isize / 2,
+                        surface.width  as isize / 2 + (p0.x * 6.0) as isize,
+                        surface.height as isize / 2 - (p0.y * 6.0) as isize,
+                        surface.width  as isize / 2 + (p1.x * 6.0) as isize,
+                        surface.height as isize / 2 - (p1.y * 6.0) as isize,
                         edge_color,
                     );
                 }
             }
         };
 
-        for sector in &map.sectors {
-            draw_sector(sector);
+        for (sector_id, sector) in map.iter_indexed_sectors() {
+            if sector_id != camera_sector {
+                render_sector(sector, 6);
+            }
+        }
+
+        if let Some(sector) = map.get_sector(camera_sector) {
+            render_sector(sector, 15);
         }
 
         // Render player
-        let (x0, y0) = (surface.width as isize / 2, surface.height as isize / 2);
-        let cfov2 = 1000isize;//((camera.fov / 2.0).cos() * 1000.0) as isize;
-        let sfov2 = 1000isize;//((camera.fov / 2.0).sin() * 1000.0) as isize;
+        let (x0, y0) = (surface.width / 2, surface.height / 2);
 
-        self.draw_line(surface, x0, y0, x0 + sfov2, y0 - cfov2, 0xFF0000);
-        self.draw_line(surface, x0, y0, x0 - sfov2, y0 - cfov2, 0xFF0000);
+        unsafe {
+            self.draw_bar_unchecked(surface, x0 - 1, y0 - 1, x0 + 2, y0 + 2, 0xFFFFFF);
+            self.draw_line_unchecked(surface, x0, y0, x0, y0 - 5, 0xFFFFFF);
+        }
     } // impl fn render_minimap
 } // impl Render
 
@@ -764,17 +446,18 @@ fn main() {
     let mut surface = softbuffer::Surface::new(&window_context, &window).unwrap();
     _ = surface.resize(surface_size.width.try_into().unwrap(), surface_size.height.try_into().unwrap());
 
-    let map_source = include_str!("../maps/test.wmt");
-    let map = Map::load_from_wmt(map_source).unwrap();
+    let map = Map::load_from_wmt(include_str!("../maps/non_euclidean.wmt")).unwrap();
     let mut camera = Camera::new();
 
-    camera.set_location(map.camera_location, map.camera_rotation, 0.5);
+    camera.set_location(map.camera_location, 0.5, map.camera_rotation);
+    let mut camera_sector = map.find_sector(camera.location).unwrap();
 
     let mut render = Render::new();
 
     let mut timer = timer::Timer::new();
-    let mut frame_index = 0;
     let mut input = input::Input::new();
+
+    let font = Font::default();
 
     event_loop.run(|event, target| {
         match event {
@@ -794,23 +477,40 @@ fn main() {
                     }
                     winit::event::WindowEvent::RedrawRequested => 'redraw: {
                         timer.response();
-                        if timer.get_fps() > 1.0 {
-                            if frame_index % (timer.get_fps().ceil() as u32) == 1 {
-                                println!("FPS: {}", timer.get_fps());
-                            }
-                        } else {
-                            println!("Less, than 1 FPS");
-                        }
-                        frame_index += 1;
 
                         let mut mut_buffer = match surface.buffer_mut() {
                             Ok(buffer) => buffer,
                             Err(_) => break 'redraw,
                         };
 
+                        if input.get_state().is_key_pressed(KeyCode::F11) {
+                            if window.fullscreen().is_some() {
+                                window.set_fullscreen(None);
+                            } else {
+                                if let Some(monitor) = window.current_monitor() {
+                                    let mut best_index: Option<usize> = None;
+                                    let mut best_count: Option<u32> = None;
+                                    for (index, count) in monitor.video_modes()
+                                        .enumerate()
+                                        .map(|(index, mode)|
+                                            (index, (mode.bit_depth() == 32) as u32 + ((mode.refresh_rate_millihertz() == 60000) as u32 + (mode.size() == winit::dpi::PhysicalSize::new(640, 480)) as u32 * 2))
+                                        ) {
+                                        if Some(count) > best_count {
+                                            best_count = Some(count);
+                                            best_index = Some(index);
+                                        }
+                                    }
+
+                                    if let Some(index) = best_index {
+                                        window.set_fullscreen(Some(winit::window::Fullscreen::Exclusive(monitor.video_modes().nth(index).unwrap())));
+                                    }
+                                }
+                            }
+                        }
+
                         'input_control: {
                             let input = input.get_state();
-                            let dt = timer.get_delta_time().max(1.0 / 500.0);
+                            let dt = timer.get_delta_time();
 
                             let ox = (input.is_key_pressed(KeyCode::KeyA) as i32 - input.is_key_pressed(KeyCode::KeyD) as i32) as f32;
                             let oy = (input.is_key_pressed(KeyCode::KeyW) as i32 - input.is_key_pressed(KeyCode::KeyS) as i32) as f32;
@@ -819,20 +519,43 @@ fn main() {
                                 break 'input_control;
                             }
 
-                            let new_location = Vec2f {
-                                x: camera.location.x + camera.rotation.cos() * oy * dt * 3.0,
-                                y: camera.location.y + camera.rotation.sin() * oy * dt * 3.0,
+                            let delta_location = Vec2f {
+                                x: camera.direction.x * oy * dt * 3.0,
+                                y: camera.direction.y * oy * dt * 3.0,
                             };
-                            if map.find_sector(new_location).is_some() {
+                            let new_location = Vec2f {
+                                x: camera.location.x + delta_location.x,
+                                y: camera.location.y + delta_location.y,
+                            };
+
+                            if let Some(new_camera_sector) = map.find_sector_from_old(new_location, camera_sector) {
+                                camera_sector = new_camera_sector;
                                 camera.set_location(new_location, 0.5, camera.rotation + ox * dt * 2.0);
                             }
                         }
 
+                        // Render main frame
                         render.render(&Surface {
                             data: mut_buffer.as_mut_ptr(),
                             width: surface_size.width as usize,
+                            stride: surface_size.width as usize,
                             height: surface_size.height as usize,
-                        }, &map, &camera);
+                        }, &map, &camera, camera_sector);
+
+                        let minimap_surface = Surface {
+                            data: mut_buffer.as_mut_ptr(),
+                            width: surface_size.width as usize / 6,
+                            stride: surface_size.width as usize,
+                            height: surface_size.height as usize / 6,
+                        };
+
+                        // Render minimap on subframe
+                        render.render_minimap(&minimap_surface, &map, &camera, camera_sector);
+
+                        let font_size = font.get_letter_size();
+                        font.put_string(&minimap_surface, 4, (font_size.height + 1) * 0 + 4, format!("FPS: {}", timer.get_fps()).as_str(), 0xFFFFFF);
+                        font.put_string(&minimap_surface, 4, (font_size.height + 1) * 1 + 4, format!("X: {}", camera.location.x).as_str(), 0xFFFFFF);
+                        font.put_string(&minimap_surface, 4, (font_size.height + 1) * 2 + 4, format!("Y: {}", camera.location.y).as_str(), 0xFFFFFF);
 
                         _ = mut_buffer.present();
 

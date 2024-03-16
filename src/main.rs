@@ -66,7 +66,7 @@ impl Render {
         const LOC_LEFT: u32 = 1;
         const LOC_RIGHT: u32 = 2;
         const LOC_BOTTOM: u32 = 4;
-        const LOC_TOP: u32 = 8;
+        const LOC_TOP: u32 = 7;
 
         let w = w as isize - 1;
         let h = h as isize - 1;
@@ -258,11 +258,11 @@ impl Render {
                 }
             };
 
-            let (color, floor_color) = match context.visit_stack.len() {
-                0 => (0x00FF00, 0x008800),
-                1 => (0xFF0000, 0x880000),
-                2 => (0x0000FF, 0x000088),
-                _ => (0x333333, 0x333333),
+            let (color, floor_color, ceil_color) = match context.visit_stack.len() {
+                0 => (0xAACCAA, 0xDDFFDD, 0x779977),
+                1 => (0xCCAAAA, 0xFFDDDD, 0x997777),
+                2 => (0xAAAACC, 0xDDDDFF, 0x777799),
+                _ => (0x333333, 0x333333, 0x333333),
             };
 
             // Edge normal and distance form user to edge
@@ -312,7 +312,7 @@ impl Render {
                     *context.inv_depth_buffer.get_unchecked_mut(x) = inv_distance;
 
                     while pptr < pceil {
-                        *pptr = 0xDDDDDD;
+                        *pptr = ceil_color;
                         pptr = pptr.add(context.surface.stride);
                     }
 
@@ -380,6 +380,7 @@ impl Render {
     /// Next frame rendering function
     /// `surface` - surface to render frame to
     /// `map` - map to render
+    #[allow(unused)]
     pub fn render_minimap(&mut self, surface: &Surface, map: &Map, camera: &Camera, camera_sector: SectorId) {
         unsafe {
             self.draw_bar_unchecked(surface, 0, 0, surface.width, surface.height, 0x000000);
@@ -399,10 +400,10 @@ impl Render {
 
                 /*unsafe*/ {
                     self.draw_line(surface,
-                        surface.width  as isize / 2 + (p0.x * 6.0) as isize,
-                        surface.height as isize / 2 - (p0.y * 6.0) as isize,
-                        surface.width  as isize / 2 + (p1.x * 6.0) as isize,
-                        surface.height as isize / 2 - (p1.y * 6.0) as isize,
+                        surface.width  as isize / 2 + (p0.x * 8.0) as isize,
+                        surface.height as isize / 2 - (p0.y * 8.0) as isize,
+                        surface.width  as isize / 2 + (p1.x * 8.0) as isize,
+                        surface.height as isize / 2 - (p1.y * 8.0) as isize,
                         edge_color,
                     );
                 }
@@ -432,7 +433,7 @@ impl Render {
 /// Main program function
 fn main() {
     let event_loop = winit::event_loop::EventLoop::new().unwrap();
-    let screen_size = winit::dpi::LogicalSize::<u32>::new(800, 600);
+    let screen_size = winit::dpi::LogicalSize::<u32>::new(700, 600);
     let window = winit::window::WindowBuilder::new()
         .with_title("WEIRD")
         .with_resizable(true)
@@ -446,7 +447,14 @@ fn main() {
     let mut surface = softbuffer::Surface::new(&window_context, &window).unwrap();
     _ = surface.resize(surface_size.width.try_into().unwrap(), surface_size.height.try_into().unwrap());
 
-    let map = Map::load_from_wmt(include_str!("../maps/non_euclidean.wmt")).unwrap();
+    let map_name = std::env::args()
+        .nth(1)
+        .and_then(|arg| {
+            std::fs::read_to_string(arg).ok()
+        })
+        .unwrap_or(include_str!("../maps/test.wmt").to_string());
+
+    let map = Map::load_from_wmt(map_name.as_str()).unwrap();
     let mut camera = Camera::new();
 
     camera.set_location(map.camera_location, 0.5, map.camera_rotation);
@@ -483,7 +491,7 @@ fn main() {
                             Err(_) => break 'redraw,
                         };
 
-                        if input.get_state().is_key_pressed(KeyCode::F11) {
+                        if input.get_state().is_key_clicked(KeyCode::F11) {
                             if window.fullscreen().is_some() {
                                 window.set_fullscreen(None);
                             } else {
@@ -550,7 +558,8 @@ fn main() {
                         };
 
                         // Render minimap on subframe
-                        render.render_minimap(&minimap_surface, &map, &camera, camera_sector);
+                        // TODO: Fix minimap itself & it's style
+                        // render.render_minimap(&minimap_surface, &map, &camera, camera_sector);
 
                         let font_size = font.get_letter_size();
                         font.put_string(&minimap_surface, 4, (font_size.height + 1) * 0 + 4, format!("FPS: {}", timer.get_fps()).as_str(), 0xFFFFFF);

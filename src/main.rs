@@ -15,12 +15,6 @@ use camera::Camera;
 
 use input::KeyCode;
 
-/// Projection information representation structure
-pub struct ProjectionInfo {
-    pub projection_width: f32,
-    pub projection_height: f32,
-}
-
 /// Renderer representation structure
 struct Render {
 } // struct Render
@@ -262,7 +256,7 @@ impl Render {
                 0 => (0xAACCAA, 0xDDFFDD, 0x779977),
                 1 => (0xCCAAAA, 0xFFDDDD, 0x997777),
                 2 => (0xAAAACC, 0xDDDDFF, 0x777799),
-                _ => (0x333333, 0x333333, 0x333333),
+                _ => (0xBBBBBB, 0xEEEEEE, 0x888888),
             };
 
             // Edge normal and distance form user to edge
@@ -281,7 +275,17 @@ impl Render {
                 (edge_norm, 1.0 / (edge_norm.x * p0.x + edge_norm.y * p0.y).abs())
             };
 
-            let is_portal = *edge_type != EdgeType::Wall;
+            let (is_portal, next_sector) = match edge_type {
+                EdgeType::Portal(next_sector) => (true, Some(next_sector)),
+                EdgeType::Wall => (false, None)
+            };
+            let (neighbour_floor_delta, neighbour_ceiling_delta) = next_sector
+                .and_then(|id| context.map.get_sector(*id))
+                .map(|neighbour_sector| {
+                    ((neighbour_sector.floor - sector.floor).max(0.0), (neighbour_sector.ceiling - sector.ceiling).min(0.0))
+                })
+                .unwrap_or((0.0, 0.0))
+            ;
 
             for x in xp0..xp1 {
                 let pixel_dir = Vec2f {
@@ -291,24 +295,26 @@ impl Render {
 
                 // edge_distance
                 let inv_distance = (pixel_dir.x * edge_norm.x + pixel_dir.y * edge_norm.y).abs() * inv_edge_distance;
-
-                let y = ((inv_distance * context.surface.height as f32) as isize).clamp(0, (context.surface.height / 2) as isize) as usize;
+                let mut ceil_y = ((((context.camera.height - sector.ceiling - neighbour_ceiling_delta) * inv_distance + 1.0) / 2.0 * context.surface.height as f32) as isize).clamp(0, context.surface.height as isize) as usize;
+                let mut floor_y = ((((context.camera.height - sector.floor - neighbour_floor_delta) * inv_distance + 1.0) / 2.0 * context.surface.height as f32) as isize).clamp(0, context.surface.height as isize) as usize;
 
                 unsafe {
                     let buf_floor = context.floor_buffer.get_unchecked_mut(x);
                     let buf_ceil = context.ceil_buffer.get_unchecked_mut(x);
 
-                    let ceil_y = context.surface.height / 2 - y;
-                    let floor_y = context.surface.height / 2 + y;
+                    ceil_y = ceil_y.clamp(*buf_ceil, *buf_floor);
+                    floor_y = floor_y.clamp(*buf_ceil, *buf_floor);
 
                     let pbegin = context.surface.data.add(x);
+
                     let mut pptr = pbegin.add(context.surface.stride * *buf_ceil);
                     let pceil = pbegin.add(context.surface.stride * ceil_y);
                     let pfloor = pbegin.add(context.surface.stride * floor_y);
                     let pend = pbegin.add(context.surface.stride * *buf_floor);
 
-                    *buf_floor = floor_y;
                     *buf_ceil = ceil_y;
+                    *buf_floor = floor_y;
+
                     *context.inv_depth_buffer.get_unchecked_mut(x) = inv_distance;
 
                     while pptr < pceil {
@@ -336,11 +342,14 @@ impl Render {
                 context.visit_stack.push_back(sector_id);
 
                 if !context.visit_stack.contains(portal_sector_id) {
-                    Self::render_sector(context, *portal_sector_id, xp0, xp1);
+                    if xp1 - xp0 > 0 {
+                        Self::render_sector(context, *portal_sector_id, xp0, xp1);
+                    }
                 }
 
                 context.visit_stack.pop_back();
             };
+
         } // 'edge_loop
     } // fn render_sector
 
@@ -452,13 +461,13 @@ fn main() {
         .and_then(|arg| {
             std::fs::read_to_string(arg).ok()
         })
-        .unwrap_or(include_str!("../maps/test.wmt").to_string());
+        .unwrap_or(include_str!("../maps/default.wmt").to_string());
 
     let map = Map::load_from_wmt(map_name.as_str()).unwrap();
     let mut camera = Camera::new();
 
     camera.set_location(map.camera_location, 0.5, map.camera_rotation);
-    let mut camera_sector = map.find_sector(camera.location).unwrap();
+    let mut camera_sector_id = map.find_sector(camera.location).unwrap();
 
     let mut render = Render::new();
 
@@ -522,23 +531,22 @@ fn main() {
 
                             let ox = (input.is_key_pressed(KeyCode::KeyA) as i32 - input.is_key_pressed(KeyCode::KeyD) as i32) as f32;
                             let oy = (input.is_key_pressed(KeyCode::KeyW) as i32 - input.is_key_pressed(KeyCode::KeyS) as i32) as f32;
+                            let oz = (input.is_key_pressed(KeyCode::KeyR) as i32 - input.is_key_pressed(KeyCode::KeyF) as i32) as f32;
 
-                            if ox == 0.0 && oy == 0.0 {
+                            if ox == 0.0 && oy == 0.0 && oz == 0.0 {
                                 break 'input_control;
                             }
 
-                            let delta_location = Vec2f {
-                                x: camera.direction.x * oy * dt * 3.0,
-                                y: camera.direction.y * oy * dt * 3.0,
-                            };
                             let new_location = Vec2f {
-                                x: camera.location.x + delta_location.x,
-                                y: camera.location.y + delta_location.y,
+                                x: camera.location.x + camera.direction.x * oy * dt * 3.0,
+                                y: camera.location.y + camera.direction.y * oy * dt * 3.0,
                             };
 
-                            if let Some(new_camera_sector) = map.find_sector_from_old(new_location, camera_sector) {
-                                camera_sector = new_camera_sector;
-                                camera.set_location(new_location, 0.5, camera.rotation + ox * dt * 2.0);
+                            if let Some(new_camera_sector_id) = map.find_sector_from_old(new_location, camera_sector_id) {
+                                camera_sector_id = new_camera_sector_id;
+                                let camera_sector = map.get_sector(camera_sector_id).unwrap();
+                                let new_height = (camera.height + oz * dt * 3.0).clamp(camera_sector.floor, camera_sector.ceiling);
+                                camera.set_location(new_location, new_height, camera.rotation + ox * dt * 2.0);
                             }
                         }
 
@@ -548,7 +556,7 @@ fn main() {
                             width: surface_size.width as usize,
                             stride: surface_size.width as usize,
                             height: surface_size.height as usize,
-                        }, &map, &camera, camera_sector);
+                        }, &map, &camera, camera_sector_id);
 
                         let minimap_surface = Surface {
                             data: mut_buffer.as_mut_ptr(),
@@ -578,4 +586,6 @@ fn main() {
             _ => {},
         }
     }).unwrap();
-}
+} // fn main
+
+// file main.rs

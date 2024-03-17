@@ -343,6 +343,8 @@ impl Map {
         Ok(Map { sectors, camera_location, camera_height, camera_rotation })
     } // fn load_from_wmt
 
+    /// Iterator through indexed sectors getting function
+    /// * Returns DoublEndedIterator with SectorId and &Sector items.E
     pub fn iter_indexed_sectors<'a>(&'a self) -> impl DoubleEndedIterator<Item = (SectorId, &'a Sector)> {
         self.sectors.iter().enumerate().map(|(index, sector)| (SectorId::new(index as u32), sector))
     }

@@ -5,11 +5,24 @@ pub struct Vec2<T> {
     pub y: T,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct Vec3<T> {
+    pub x: T,
+    pub y: T,
+    pub z: T,
+}
+
 impl<T: std::fmt::Display> std::fmt::Display for Vec2<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("<{}, {}>", self.x, self.y))
     }
 } // impl std::fmt::Display for Vec2
+
+impl<T: std::fmt::Display> std::fmt::Display for Vec3<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("<{}, {}, {}>", self.x, self.y, self.z))
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 pub struct Ext2<T> {
@@ -18,4 +31,5 @@ pub struct Ext2<T> {
 }
 
 pub type Vec2f = Vec2<f32>;
-pub type Ext2zu = Vec2<f32>;
+pub type Vec2si = Vec2<isize>;
+pub type Ext2su = Vec2<usize>;

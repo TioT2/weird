@@ -137,14 +137,14 @@ impl Map {
             .map(|(index, _)| SectorId::new(index as u32))
     }
 
-    pub fn find_sector_from_old(&self, location: Vec2f, old_sector: SectorId) -> Option<SectorId> {
-        let sector = match self.get_sector(old_sector) {
+    pub fn find_adjacent_sector(&self, location: Vec2f, adjacent_for: SectorId) -> Option<SectorId> {
+        let sector = match self.get_sector(adjacent_for) {
             Some(sector) => sector,
             None => return None,
         };
 
         if sector.contains(location) {
-            return Some(old_sector);
+            return Some(adjacent_for);
         }
 
         // Try find in adjoint edges or just find if not
@@ -160,6 +160,10 @@ impl Map {
                 .map(|sector| (id, sector)))
             .find(|(_, sector)| sector.contains(location))
             .map(|(id, _)| *id)
+    }
+
+    pub fn find_sector_from_old(&self, location: Vec2f, old_sector: SectorId) -> Option<SectorId> {
+        self.find_adjacent_sector(location, old_sector)
             .or_else(|| self.find_sector(location))
     }
 

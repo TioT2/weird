@@ -487,7 +487,7 @@ fn main() {
                                         new_rotation,
                                     );
                                 } else {
-                                    if new_height > new_camera_sector.floor && new_height < new_camera_sector.ceiling {
+                                    if new_height >= new_camera_sector.floor && new_height <= new_camera_sector.ceiling {
                                         camera.set_location(
                                             new_location,
                                             new_height,

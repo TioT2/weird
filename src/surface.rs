@@ -1,15 +1,19 @@
 use crate::Ext2;
 
-
+/// Software rendering surface representation structure
 #[derive(Copy, Clone)]
 pub struct Surface {
     pub data: *mut u32,
     pub width: usize,
     pub stride: usize,
     pub height: usize,
-}
+} // struct Surface
 
 impl Surface {
+    /// Unclipped bar display function
+    /// * `x0`, `y0` - bar begin point
+    /// * `x1`, `y1` - bar end point
+    /// * `color` - bar color
     pub unsafe fn draw_bar_unchecked(&self, x0: usize, y0: usize, x1: usize, y1: usize, color: u32) {
         let mut yptr = self.data.add(y0 * self.stride + x0);
         let yeptr = yptr.add((y1 - y0) * self.stride);
@@ -26,8 +30,12 @@ impl Surface {
 
             yptr = yptr.add(self.stride);
         }
-    }
+    } // fn draw_bar
 
+    /// Checked bar display function
+    /// * `x0`, `y0` - first bar point
+    /// * `x1`, `y1` - second bar point
+    /// * `color` - bar color
     pub fn draw_bar(&self, x0: isize, y0: isize, x1: isize, y1: isize, color: u32) {
         unsafe {
             let x0 = std::mem::transmute::<isize, usize>(x0.clamp(0, self.width as isize));
@@ -38,8 +46,13 @@ impl Surface {
 
             self.draw_bar_unchecked(x0, y0, x1, y1, color);
         }
-    }
+    } // fn draw_bar
 
+    /// Line clipping in on (0, 0, width, height) rectangle function
+    /// * `x0`, `y0` - first line point position
+    /// * `x1`, `y1` - second line point position
+    /// * `w`, `h` - clipping surface size
+    /// * Returns (optionally, line can be clipped fully), clipped line points, granted, that they are contained in (0, 0, w, h) rectangle.
     fn clip_line(mut x0: isize, mut y0: isize, mut x1: isize, mut y1: isize, w: usize, h: usize) -> Option<(usize, usize, usize, usize)> {
         // Clip line
         const LOC_INSIDE: u32 = 0;
@@ -124,16 +137,24 @@ impl Surface {
         } else {
             None
         }
-    }
+    } // fn clip_line
 
+    /// Line drawing function
+    /// * `x0`, `y0` - first line point
+    /// * `x1`, `y1` - second line point
+    /// * `color` - color of line
     pub fn draw_line(&self, x0: isize, y0: isize, x1: isize, y1: isize, color: u32) {
         if let Some((x0, y0, x1, y1)) = Self::clip_line(x0, y0, x1, y1, self.width, self.height) {
             unsafe {
                 self.draw_line_unchecked(x0, y0, x1, y1, color);
             }
         }
-    }
+    } // fn draw_line
 
+    /// Unchecked line draw function
+    /// * `x0`, `y0` - first line point
+    /// * `x1`, `y1` - second line point
+    /// * `color` - color
     pub unsafe fn draw_line_unchecked(&self, x0: usize, y0: usize, x1: usize, y1: usize, color: u32) {
         let (mut dy, sy): (usize, usize) = if y1 < y0 {
             (y0 - y1, self.stride.wrapping_neg())
@@ -183,24 +204,30 @@ impl Surface {
                 }
             }
         }
-    }
+    } // fn draw_line_unchecked
 
+    /// Surface data getting function
+    /// * Returns slice of all surface data
     pub fn get_data_mut<'a>(&'a mut self) -> &'a mut [u32] {
         unsafe {
             std::slice::from_raw_parts_mut(self.data, self.stride * self.height)
         }
-    }
+    } // fn get_data_mut
 
+    /// Surface extent getting function
+    /// * Returns surface extent
     pub fn get_extent(&self) -> Ext2<usize> {
         Ext2 {
             width: self.width,
             height: self.height,
         }
-    }
+    } // fn get_extent
 
+    /// Surface data stride getting function
+    /// * Returns length of single surface row in bytes
     pub fn get_stride(&self) -> usize {
         self.stride
-    }
-}
+    } // fn get_stride
+} // impl Surface
 
 // file self.rs

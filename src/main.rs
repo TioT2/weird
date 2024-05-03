@@ -6,7 +6,6 @@ pub mod camera;
 pub mod map;
 pub mod font;
 pub mod surface;
-pub mod map_editor;
 
 use font::Font;
 use map::*;
@@ -43,7 +42,7 @@ impl Render {
             None => return,
         };
 
-        'edge_loop: for (edge, edge_type) in sector.edges.iter().zip(sector.edge_types.iter()) {
+        'edge_loop: for edge in &sector.edges {
             let mut p0 = context.camera.to_space(edge.p0);
             let mut p1 = context.camera.to_space(edge.p1);
 
@@ -110,9 +109,9 @@ impl Render {
                 (edge_norm, 1.0 / (edge_norm.x * p0.x + edge_norm.y * p0.y).abs())
             };
 
-            let neighbour_bounds = match edge_type {
+            let neighbour_bounds = match edge.ty {
                 EdgeType::Portal(next_sector_id) => context.map
-                    .get_sector(*next_sector_id)
+                    .get_sector(next_sector_id)
                     .map(|neighbour_sector| (neighbour_sector.floor, neighbour_sector.ceiling))
                 ,
                 EdgeType::Wall => None,
@@ -182,24 +181,6 @@ impl Render {
                             *p_current = color;
                             p_current = p_current.add(context.surface.stride);
                         }
-
-                        /*
-                        struct Edge {
-                            lower_texture: TextureId,
-                            middle_texture: Option<TextureId>,
-                            upper_texture: TextureId,
-                        }
-
-                        struct Sector {
-                            ceiling_height: f32,
-                            floor_height: f32,
-                            ceiling_texture: TextureId,
-                            floor_texture: TextureId,
-                            light: u8,
-
-                            edges: Vec<Edge>,
-                        }
-                         */
                     } else {
                         // Middle block
                         while p_current < p_floor {
@@ -223,12 +204,12 @@ impl Render {
             }
 
             // Deferred neighbour rendering
-            if let EdgeType::Portal(portal_sector_id) = edge_type {
+            if let EdgeType::Portal(portal_sector_id) = edge.ty {
                 context.visit_stack.push_back(sector_id);
 
-                if !context.visit_stack.contains(portal_sector_id) {
+                if !context.visit_stack.contains(&portal_sector_id) {
                     if xp1 - xp0 > 0 {
-                        Self::render_sector(context, *portal_sector_id, xp0, xp1);
+                        Self::render_sector(context, portal_sector_id, xp0, xp1);
                     }
                 }
 
@@ -278,13 +259,13 @@ impl Render {
     pub fn render_minimap(&mut self, surface: &Surface, map: &Map, camera: &Camera, camera_sector: SectorId) {
 
         let render_sector = |sector: &Sector, color_scale: u32| {
-            for (edge, edge_type) in sector.edges.iter().zip(sector.edge_types.iter()) {
+            for edge in &sector.edges {
                 // Calculate edge projection
                 let p0 = camera.to_space(edge.p0);
                 let p1 = camera.to_space(edge.p1);
 
                 // Project edge to pixel space and render, actually
-                let edge_color = match edge_type {
+                let edge_color = match edge.ty {
                     EdgeType::Wall => 0x001100,
                     EdgeType::Portal(_) => 0x110000,
                 } * color_scale;
@@ -302,10 +283,10 @@ impl Render {
         };
 
         if let Some(sector) = map.get_sector(camera_sector) {
-            let adjacent_sectors = sector.edge_types
+            let adjacent_sectors = sector.edges
                 .iter()
                 .filter_map(|edge| {
-                    if let EdgeType::Portal(sector_id) = *edge {
+                    if let EdgeType::Portal(sector_id) = edge.ty {
                         Some(sector_id)
                     } else {
                         None
@@ -333,7 +314,7 @@ impl Render {
 /// Main program function
 fn main() {
     let event_loop = winit::event_loop::EventLoop::new().unwrap();
-    let screen_size = winit::dpi::LogicalSize::<u32>::new(700, 600);
+    let screen_size = winit::dpi::PhysicalSize::<u32>::new(800, 600);
     let window = winit::window::WindowBuilder::new()
         .with_title("WEIRD")
         .with_resizable(true)
@@ -349,11 +330,8 @@ fn main() {
 
     let map_name = std::env::args()
         .nth(1)
-        .and_then(|arg| {
-            std::fs::read_to_string(arg).ok()
-        })
-        .unwrap_or(include_str!("../maps/default.wmt").to_string());
-
+        .and_then(|arg| std::fs::read_to_string(arg).ok())
+        .unwrap_or(include_str!("../maps/default.wmt").into());
     let map = Map::load_from_wmt(map_name.as_str()).unwrap();
     let mut camera = Camera::new();
 
@@ -369,7 +347,7 @@ fn main() {
 
     event_loop.run(|event, target| {
         match event {
-            winit::event::Event::DeviceEvent { device_id, event } => {
+            winit::event::Event::DeviceEvent { device_id: _, event } => {
                 match event {
                     winit::event::DeviceEvent::Button { button, state } => {
                         let key_code = match button {
@@ -393,7 +371,7 @@ fn main() {
                     winit::event::WindowEvent::KeyboardInput { event, .. } => if let winit::keyboard::PhysicalKey::Code(code) = event.physical_key {
                         input.on_key_state_change(code, event.state == winit::event::ElementState::Pressed);
                     }
-                    winit::event::WindowEvent::CursorMoved { device_id, position } => {
+                    winit::event::WindowEvent::CursorMoved { device_id: _, position } => {
                         let motion: winit::dpi::LogicalPosition<f32> = position.to_logical(window.scale_factor());
 
                         input.on_mouse_move(Vec2f {
@@ -402,7 +380,7 @@ fn main() {
                         });
                     }
                     winit::event::WindowEvent::Resized(size) => {
-                        surface_size = size.to_logical(window.scale_factor());
+                        surface_size = size;
                         if let Some((width, height)) = surface_size.width.try_into().ok().zip(surface_size.height.try_into().ok()) {
                             _ = surface.resize(width, height);
                         }
@@ -421,12 +399,15 @@ fn main() {
                             } else {
                                 // Find perfect suitable videomode
                                 if let Some(monitor) = window.current_monitor() {
+                                    for mode in monitor.video_modes() {
+                                        println!("{mode}");
+                                    }
                                     let mut best_index: Option<usize> = None;
                                     let mut best_count: Option<u32> = None;
                                     for (index, count) in monitor.video_modes()
                                         .enumerate()
                                         .map(|(index, mode)|
-                                            (index, (mode.bit_depth() == 32) as u32 + ((mode.refresh_rate_millihertz() == 60000) as u32 + (mode.size() == winit::dpi::PhysicalSize::new(640, 480)) as u32 * 2))
+                                            (index, (mode.bit_depth() == 32) as u32 + ((mode.refresh_rate_millihertz() == 48000) as u32 + (mode.size() == winit::dpi::PhysicalSize::new(640, 480)) as u32 * 2))
                                         ) {
                                         if Some(count) > best_count {
                                             best_count = Some(count);

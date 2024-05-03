@@ -1,9 +1,8 @@
-
 use std::collections::HashSet;
 use crate::util::unordered_pair::UnorderedPair;
 use crate::math::*;
 
-/// Sector edge representation structure
+/// Sector type representation structure
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum EdgeType {
     /// Wall
@@ -12,13 +11,20 @@ pub enum EdgeType {
     Portal(SectorId),
 } // enum Edge
 
+/// Edgre math data container
 #[derive(Copy, Clone, Debug)]
 pub struct Edge {
+    /// Edge first point position
     pub p0: Vec2f,
+    /// Edge second point position
     pub p1: Vec2f,
+    /// p0 -> p1 direction
     pub d: Vec2f,
+    /// d and p0 cross product
     pub d_cross_p0: f32,
-}
+    /// Edge type
+    pub ty: EdgeType, 
+} // struct Edge
 
 impl std::fmt::Display for EdgeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -31,8 +37,8 @@ impl std::fmt::Display for EdgeType {
 
 /// Sector representation structure
 pub struct Sector {
+    /// Sector point set
     pub points: Vec<Vec2f>,
-    pub edge_types: Vec<EdgeType>,
     pub edges: Vec<Edge>,
     pub floor: f32,
     pub ceiling: f32,
@@ -41,26 +47,19 @@ pub struct Sector {
 impl Sector {
     /// Sector with loop of walls representation structure
     pub fn wall_loop(points: &[Vec2f]) -> Self {
-        let mut sector = Self {
+        Self {
             points: points.into(),
-            edge_types: {
-                let mut edges = Vec::<EdgeType>::with_capacity(points.len());
-                edges.resize(points.len(), EdgeType::Wall);
-                edges
-            },
-            edges: Vec::new(),
+            edges: Sector::build_edges(points),
             floor: 0.0,
             ceiling: 1.0,
-        };
-        sector.edges = sector.build_edges();
-        sector
+        }
     } // fn wall_loop
 
-    pub fn build_edges(&self) -> Vec<Edge> {
-        let mut edge_lines = Vec::<Edge>::with_capacity(self.points.len());
+    pub fn build_edges(points: &[Vec2f]) -> Vec<Edge> {
+        let mut edge_lines = Vec::<Edge>::with_capacity(points.len());
 
-        for (left, right) in self.points.iter().zip({
-            let pit = self.points.iter();
+        for (left, right) in points.iter().zip({
+            let pit = points.iter();
             let mut pit = pit.cycle();
             pit.next();
             pit
@@ -75,6 +74,7 @@ impl Sector {
                 p1: *right,
                 d_cross_p0: d.x * left.y - d.y * left.x,
                 d,
+                ty: EdgeType::Wall,
             });
         }
 
@@ -101,7 +101,7 @@ impl std::fmt::Display for Sector {
             edges: {:?}\n\
             bounds: [{}; {}]\n\
             ",
-            self.points, self.edge_types, self.floor, self.ceiling,
+            self.points, self.edges, self.floor, self.ceiling,
         ))
     }
 }
@@ -148,9 +148,9 @@ impl Map {
         }
 
         // Try find in adjoint edges or just find if not
-        sector.edge_types
+        sector.edges
             .iter()
-            .filter_map(|sector| if let EdgeType::Portal(id) = sector {
+            .filter_map(|edge| if let EdgeType::Portal(id) = edge.ty {
                 Some(id)
             } else {
                 None
@@ -159,7 +159,7 @@ impl Map {
                 .get(id.as_u32() as usize)
                 .map(|sector| (id, sector)))
             .find(|(_, sector)| sector.contains(location))
-            .map(|(id, _)| *id)
+            .map(|(id, _)| id)
     }
 
     pub fn find_sector_from_old(&self, location: Vec2f, old_sector: SectorId) -> Option<SectorId> {
@@ -323,24 +323,25 @@ impl Map {
 
                             Ok(EdgeType::Portal(SectorId::new(adjoint)))
                         }
-                    })
-                    .collect::<Result<Vec<EdgeType>, WmtLoadingError>>()?;
+                    }).collect::<Result<Vec<_>, WmtLoadingError>>()?;
 
                 // Validate sector bounds
                 if sector.floor > sector.ceiling {
                     return Err(WmtLoadingError::InvalidSectorBounds { floor: sector.floor, ceiling: sector.ceiling })
                 }
 
-                let mut sector = Sector {
+                let mut edge_lines = Sector::build_edges(&points);
+
+                for (line, ty) in edge_lines.iter_mut().zip(edges) {
+                    line.ty = ty;
+                }
+
+                Ok(Sector {
                     points,
-                    edge_types: edges,
-                    edges: Vec::new(),
+                    edges: edge_lines,
                     floor: sector.floor,
                     ceiling: sector.ceiling,
-                };
-                sector.edges = sector.build_edges();
-
-                Ok(sector)
+                })
             })
             .collect::<Result<Vec<Sector>, WmtLoadingError>>()?;
 

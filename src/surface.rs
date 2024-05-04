@@ -1,21 +1,34 @@
+/// WEIRD Project
+/// `File` surface.rs
+/// `Description` Surface implementation module
+/// `Author` TioT2
+/// `Last changed` 04.05.2024
+
 use crate::Ext2;
 
 /// Software rendering surface representation structure
-#[derive(Copy, Clone)]
-pub struct Surface {
-    pub data: *mut u32,
-    pub width: usize,
-    pub stride: usize,
-    pub height: usize,
+pub struct Surface<'t> {
+    data: &'t mut [u32],
+    width: usize,
+    stride: usize,
+    height: usize,
 } // struct Surface
 
-impl Surface {
+impl<'t> Surface<'t> {
+    pub fn new(data: &'t mut [u32], width: usize, height: usize, stride: usize) -> Self {
+        Self {
+            data,
+            width,
+            height,
+            stride
+        }
+    } // fn new
     /// Unclipped bar display function
     /// * `x0`, `y0` - bar begin point
     /// * `x1`, `y1` - bar end point
     /// * `color` - bar color
-    pub unsafe fn draw_bar_unchecked(&self, x0: usize, y0: usize, x1: usize, y1: usize, color: u32) {
-        let mut yptr = self.data.add(y0 * self.stride + x0);
+    pub unsafe fn draw_bar_unchecked(&mut self, x0: usize, y0: usize, x1: usize, y1: usize, color: u32) {
+        let mut yptr = self.data.as_mut_ptr().add(y0 * self.stride + x0);
         let yeptr = yptr.add((y1 - y0) * self.stride);
         let dx = x1 - x0;
 
@@ -36,7 +49,7 @@ impl Surface {
     /// * `x0`, `y0` - first bar point
     /// * `x1`, `y1` - second bar point
     /// * `color` - bar color
-    pub fn draw_bar(&self, x0: isize, y0: isize, x1: isize, y1: isize, color: u32) {
+    pub fn draw_bar(&mut self, x0: isize, y0: isize, x1: isize, y1: isize, color: u32) {
         unsafe {
             let x0 = std::mem::transmute::<isize, usize>(x0.clamp(0, self.width as isize));
             let y0 = std::mem::transmute::<isize, usize>(y0.clamp(0, self.height as isize));
@@ -143,7 +156,7 @@ impl Surface {
     /// * `x0`, `y0` - first line point
     /// * `x1`, `y1` - second line point
     /// * `color` - color of line
-    pub fn draw_line(&self, x0: isize, y0: isize, x1: isize, y1: isize, color: u32) {
+    pub fn draw_line(&mut self, x0: isize, y0: isize, x1: isize, y1: isize, color: u32) {
         if let Some((x0, y0, x1, y1)) = Self::clip_line(x0, y0, x1, y1, self.width, self.height) {
             unsafe {
                 self.draw_line_unchecked(x0, y0, x1, y1, color);
@@ -155,7 +168,7 @@ impl Surface {
     /// * `x0`, `y0` - first line point
     /// * `x1`, `y1` - second line point
     /// * `color` - color
-    pub unsafe fn draw_line_unchecked(&self, x0: usize, y0: usize, x1: usize, y1: usize, color: u32) {
+    pub unsafe fn draw_line_unchecked(&mut self, x0: usize, y0: usize, x1: usize, y1: usize, color: u32) {
         let (mut dy, sy): (usize, usize) = if y1 < y0 {
             (y0 - y1, self.stride.wrapping_neg())
         } else {
@@ -167,7 +180,7 @@ impl Surface {
             (x1 - x0, 1usize)
         };
 
-        let mut pptr = self.data.wrapping_add(y0 * self.stride + x0);
+        let mut pptr = self.data.as_mut_ptr().wrapping_add(y0 * self.stride + x0);
         pptr.write(color);
 
         if dx >= dy {
@@ -207,12 +220,16 @@ impl Surface {
     } // fn draw_line_unchecked
 
     /// Surface data getting function
-    /// * Returns slice of all surface data
+    /// * Returns mutable slice of all surface data
     pub fn get_data_mut<'a>(&'a mut self) -> &'a mut [u32] {
-        unsafe {
-            std::slice::from_raw_parts_mut(self.data, self.stride * self.height)
-        }
+        self.data
     } // fn get_data_mut
+
+    /// Surface data getting function
+    /// * Returns slice of all surface data
+    pub fn get_data<'a>(&'a self) -> &'a [u32] {
+        self.data
+    } // fn get_data
 
     /// Surface extent getting function
     /// * Returns surface extent

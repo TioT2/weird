@@ -75,9 +75,11 @@ impl Font {
     /// * `y` - string y coordinate
     /// * `line` - string to put
     /// * `color` - text color
-    pub fn put_string(&self, surface: &Surface, x: usize, y: usize, line: &str, color: u32) {
+    pub fn put_string(&self, surface: &mut Surface, x: usize, y: usize, line: &str, color: u32) {
         // base pointer
-        let mut base_ptr = unsafe { surface.data.add(y * surface.stride + x) };
+        let stride = surface.get_stride();
+        let ext = surface.get_extent();
+        let mut base_ptr = unsafe { surface.get_data_mut().as_mut_ptr().add(y * stride + x) };
 
         for (index, ch_unicode) in line.chars().enumerate() {
             let ch = if ch_unicode.is_ascii() {
@@ -87,7 +89,7 @@ impl Font {
             };
 
             // Break the loop if have to enough space to print next letter
-            if (index + 1) * (self.width + 1) - 1 + x >= surface.width {
+            if (index + 1) * (self.width + 1) - 1 + x >= ext.width {
                 break;
             }
 
@@ -107,7 +109,7 @@ impl Font {
                     x_ptr = unsafe { x_ptr.add(1) };
                 }
 
-                y_ptr = unsafe { y_ptr.add(surface.stride) };
+                y_ptr = unsafe { y_ptr.add(surface.get_stride()) };
             }
 
             // put character

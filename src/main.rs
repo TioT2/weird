@@ -1,3 +1,9 @@
+/// WEIRD Project
+/// `File` main.rs
+/// `Description` Main project module
+/// `Author` TioT2
+/// `Last changed` 04.05.2024
+
 pub mod util;
 pub mod timer;
 pub mod input;
@@ -19,8 +25,8 @@ use input::KeyCode;
 struct Render {
 } // struct Render
 
-struct RenderContext<'a> {
-    surface: &'a Surface,
+struct RenderContext<'a, 'b> where 'b: 'a {
+    surface: &'a mut Surface<'b>,
     map: &'a Map,
     camera: &'a Camera,
     visit_stack: std::collections::VecDeque<SectorId>,
@@ -37,6 +43,8 @@ impl Render {
     }
 
     fn render_sector(context: &mut RenderContext, sector_id: SectorId, screen_x_begin: usize, screen_x_end: usize) {
+        let ext = context.surface.get_extent();
+        let stride = context.surface.get_stride();
         let sector = match context.map.get_sector(sector_id) {
             Some(sector) => sector,
             None => return,
@@ -71,7 +79,7 @@ impl Render {
             }
 
             let to_screen_x = |p: Vec2f| -> isize {
-                ((p.x / p.y / 2.0 + 0.5) * context.surface.width as f32) as isize
+                ((p.x / p.y / 2.0 + 0.5) * ext.width as f32) as isize
             };
 
 
@@ -117,9 +125,11 @@ impl Render {
                 EdgeType::Wall => None,
             };
 
+            let surface_data_ptr = context.surface.get_data_mut().as_mut_ptr();
+
             for x in xp0..xp1 {
                 let pixel_dir = Vec2f {
-                    x: x as f32 / context.surface.width as f32 * 2.0 - 1.0,
+                    x: x as f32 / ext.width as f32 * 2.0 - 1.0,
                     y: 1.0,
                 };
 
@@ -127,7 +137,7 @@ impl Render {
                 let inv_distance = (pixel_dir.x * edge_norm.x + pixel_dir.y * edge_norm.y).abs() * inv_edge_distance;
 
                 let to_screen_height = |height: f32| -> usize {
-                    ((((context.camera.height - height) * inv_distance + 1.0) / 2.0 * context.surface.height as f32) as isize).clamp(0, context.surface.height as isize) as usize
+                    ((((context.camera.height - height) * inv_distance + 1.0) / 2.0 * ext.height as f32) as isize).clamp(0, ext.height as isize) as usize
                 };
 
                 let mut ceil_y = to_screen_height(sector.ceiling);
@@ -140,19 +150,19 @@ impl Render {
                     ceil_y = ceil_y.clamp(*buf_ceil, *buf_floor);
                     floor_y = floor_y.clamp(*buf_ceil, *buf_floor);
 
-                    let p_base = context.surface.data.add(x);
-                    let p_ceil = p_base.add(context.surface.stride * ceil_y);
-                    let p_floor = p_base.add(context.surface.stride * floor_y);
-                    let p_end = p_base.add(context.surface.stride * *buf_floor);
+                    let p_base = surface_data_ptr.add(x);
+                    let p_ceil = p_base.add(stride * ceil_y);
+                    let p_floor = p_base.add(stride * floor_y);
+                    let p_end = p_base.add(stride * *buf_floor);
 
-                    let mut p_current = p_base.add(context.surface.stride * *buf_ceil);
+                    let mut p_current = p_base.add(stride * *buf_ceil);
 
                     *context.inv_depth_buffer.get_unchecked_mut(x) = inv_distance;
 
                     // Ceiling
                     while p_current < p_ceil {
                         *p_current = ceil_color;
-                        p_current = p_current.add(context.surface.stride);
+                        p_current = p_current.add(stride);
                     }
 
                     if let Some((neighbour_floor, neighbour_ceiling)) = neighbour_bounds {
@@ -160,13 +170,13 @@ impl Render {
                         let neighbour_ceil_y = to_screen_height(neighbour_ceiling).clamp(ceil_y, floor_y);
                         let neighbour_floor_y = to_screen_height(neighbour_floor).clamp(ceil_y, floor_y);
 
-                        let p_neighbour_ceil = p_base.add(context.surface.stride * neighbour_ceil_y);
-                        let p_neighbour_floor = p_base.add(context.surface.stride * neighbour_floor_y);
+                        let p_neighbour_ceil = p_base.add(stride * neighbour_ceil_y);
+                        let p_neighbour_floor = p_base.add(stride * neighbour_floor_y);
 
                         // Upper wall
                         while p_current < p_neighbour_ceil {
                             *p_current = color;
-                            p_current = p_current.add(context.surface.stride);
+                            p_current = p_current.add(stride);
                         }
 
                         // Skip portal
@@ -179,13 +189,13 @@ impl Render {
                         // Lower wall
                         while p_current < p_floor {
                             *p_current = color;
-                            p_current = p_current.add(context.surface.stride);
+                            p_current = p_current.add(stride);
                         }
                     } else {
                         // Middle block
                         while p_current < p_floor {
                             *p_current = color;
-                            p_current = p_current.add(context.surface.stride);
+                            p_current = p_current.add(stride);
                         }
 
                         // Don't actually need it
@@ -198,7 +208,7 @@ impl Render {
                     // Floor
                     while p_current < p_end {
                         *p_current = floor_color;
-                        p_current = p_current.add(context.surface.stride);
+                        p_current = p_current.add(stride);
                     }
                 }
             }
@@ -223,32 +233,36 @@ impl Render {
     /// `surface` - surface to render frame to
     /// `map` - map to render
     /// `sector_id` - id of sector to start rendering from
-    pub fn render(&mut self, surface: &Surface, map: &Map, camera: &Camera, sector_id: SectorId) {
+    pub fn render(&mut self, surface: &mut Surface, map: &Map, camera: &Camera, sector_id: SectorId) {
         // Render only if sector actually exists
         if map.get_sector(sector_id).is_some() {
+            let ext = surface.get_extent();
+            let mut floor_buffer = {
+                let mut buffer = Vec::with_capacity(ext.width);
+                buffer.resize(ext.width, ext.height);
+                buffer
+            };
+            let mut ceil_buffer = {
+                let mut buffer = Vec::with_capacity(ext.width);
+                buffer.resize(ext.width, 0usize);
+                buffer
+            };
+            let mut inv_depth_buffer = {
+                let mut buffer = Vec::with_capacity(ext.width);
+                buffer.resize(ext.width, 0f32);
+                buffer
+            };
             let mut context = RenderContext {
-                surface,
                 map,
                 camera,
                 visit_stack: std::collections::VecDeque::new(),
-                floor_buffer: &mut {
-                    let mut buffer = Vec::with_capacity(surface.width);
-                    buffer.resize(surface.width, surface.height);
-                    buffer
-                },
-                ceil_buffer: &mut {
-                    let mut buffer = Vec::with_capacity(surface.width);
-                    buffer.resize(surface.width, 0);
-                    buffer
-                },
-                inv_depth_buffer: &mut {
-                    let mut buffer = Vec::with_capacity(surface.width);
-                    buffer.resize(surface.width, 0.0);
-                    buffer
-                },
+                floor_buffer: &mut floor_buffer,
+                ceil_buffer: &mut ceil_buffer,
+                inv_depth_buffer: &mut inv_depth_buffer,
+                surface,
             };
 
-            Self::render_sector(&mut context, sector_id, 0, surface.width);
+            Self::render_sector(&mut context, sector_id, 0, ext.width);
         }
     } // fn next_frame
 
@@ -256,9 +270,9 @@ impl Render {
     /// `surface` - surface to render frame to
     /// `map` - map to render
     #[allow(unused)]
-    pub fn render_minimap(&mut self, surface: &Surface, map: &Map, camera: &Camera, camera_sector: SectorId) {
-
-        let render_sector = |sector: &Sector, color_scale: u32| {
+    pub fn render_minimap(&mut self, surface: &mut Surface, map: &Map, camera: &Camera, camera_sector: SectorId) {
+        let ext = surface.get_extent();
+        let mut render_sector = |sector: &Sector, color_scale: u32| {
             for edge in &sector.edges {
                 // Calculate edge projection
                 let p0 = camera.to_space(edge.p0);
@@ -272,10 +286,10 @@ impl Render {
 
                 /*unsafe*/ {
                     surface.draw_line(
-                        surface.width  as isize / 2 + (p0.x * 6.0) as isize,
-                        surface.height as isize / 2 - (p0.y * 6.0) as isize,
-                        surface.width  as isize / 2 + (p1.x * 6.0) as isize,
-                        surface.height as isize / 2 - (p1.y * 6.0) as isize,
+                        ext.width  as isize / 2 + (p0.x * 6.0) as isize,
+                        ext.height as isize / 2 - (p0.y * 6.0) as isize,
+                        ext.width  as isize / 2 + (p1.x * 6.0) as isize,
+                        ext.height as isize / 2 - (p1.y * 6.0) as isize,
                         edge_color,
                     );
                 }
@@ -304,7 +318,7 @@ impl Render {
         }
 
         // Render player
-        let (x0, y0) = ((surface.width / 2) as isize, (surface.height / 2) as isize);
+        let (x0, y0) = ((ext.width / 2) as isize, (ext.height / 2) as isize);
 
         surface.draw_bar( x0 - 1, y0 - 1, x0 + 2, y0 + 2, 0xFFFFFF);
         surface.draw_line( x0, y0, x0, y0 - 5, 0xFFFFFF);
@@ -480,30 +494,33 @@ fn main() {
                             }
                         }
 
-                        // Render main frame
-                        render.render(&Surface {
-                            data: mut_buffer.as_mut_ptr(),
-                            width: surface_size.width as usize,
-                            stride: surface_size.width as usize,
-                            height: surface_size.height as usize,
-                        }, &map, &camera, camera_sector_id);
-
-                        let minimap_surface = Surface {
-                            data: mut_buffer.as_mut_ptr(),
-                            width: surface_size.width as usize / 3,
-                            stride: surface_size.width as usize,
-                            height: surface_size.height as usize / 3,
+                        let mut_buffer_slice = unsafe {
+                            std::slice::from_raw_parts_mut(mut_buffer.as_mut_ptr(), mut_buffer.len())
                         };
+                        // Render main frame
+                        render.render(&mut Surface::new(
+                            mut_buffer_slice,
+                            surface_size.width as usize,
+                            surface_size.height as usize,
+                            surface_size.width as usize,
+                        ), &map, &camera, camera_sector_id);
+
+                        let mut minimap_surface = Surface::new(
+                            mut_buffer_slice,
+                            surface_size.width as usize / 3,
+                            surface_size.height as usize / 3,
+                            surface_size.width as usize,
+                        );
 
                         // Render minimap on subframe
                         // TODO: Fix minimap itself & it's style
-                        render.render_minimap(&minimap_surface, &map, &camera, camera_sector_id);
+                        render.render_minimap(&mut minimap_surface, &map, &camera, camera_sector_id);
 
                         let font_size = font.get_letter_size();
-                        font.put_string(&minimap_surface, 4, (font_size.height + 1) * 0 + 4, format!("FPS: {}", timer.get_fps()).as_str(), 0xFFFFFF);
-                        font.put_string(&minimap_surface, 4, (font_size.height + 1) * 1 + 4, format!("X: {}", camera.location.x).as_str(), 0xFFFFFF);
-                        font.put_string(&minimap_surface, 4, (font_size.height + 1) * 2 + 4, format!("Y: {}", camera.location.y).as_str(), 0xFFFFFF);
-                        font.put_string(&minimap_surface, 4, (font_size.height + 1) * 3 + 4, format!("H: {}", camera.height    ).as_str(), 0xFFFFFF);
+                        font.put_string(&mut minimap_surface, 4, (font_size.height + 1) * 0 + 4, format!("FPS: {}", timer.get_fps()).as_str(), 0xFFFFFF);
+                        font.put_string(&mut minimap_surface, 4, (font_size.height + 1) * 1 + 4, format!("X: {}", camera.location.x).as_str(), 0xFFFFFF);
+                        font.put_string(&mut minimap_surface, 4, (font_size.height + 1) * 2 + 4, format!("Y: {}", camera.location.y).as_str(), 0xFFFFFF);
+                        font.put_string(&mut minimap_surface, 4, (font_size.height + 1) * 3 + 4, format!("H: {}", camera.height    ).as_str(), 0xFFFFFF);
 
                         _ = mut_buffer.present();
 

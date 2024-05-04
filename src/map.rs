@@ -1,3 +1,9 @@
+/// WEIRD Project
+/// `File` map.rs
+/// `Description` Map implementation module
+/// `Author` TioT2
+/// `Last changed` 04.05.2024
+
 use std::collections::HashSet;
 use crate::util::unordered_pair::UnorderedPair;
 use crate::math::*;
@@ -39,13 +45,18 @@ impl std::fmt::Display for EdgeType {
 pub struct Sector {
     /// Sector point set
     pub points: Vec<Vec2f>,
+    /// TODO Order
     pub edges: Vec<Edge>,
+    /// Floor height
     pub floor: f32,
+    /// Ceiling height
     pub ceiling: f32,
 } // struct Sector
 
 impl Sector {
     /// Sector with loop of walls representation structure
+    /// * `points` - set of points forming sector, points polygon convexity required
+    /// * Returns sector with `points` points
     pub fn wall_loop(points: &[Vec2f]) -> Self {
         Self {
             points: points.into(),
@@ -55,7 +66,10 @@ impl Sector {
         }
     } // fn wall_loop
 
-    pub fn build_edges(points: &[Vec2f]) -> Vec<Edge> {
+    /// Edges from points building function
+    /// * `points` - points to build edges from
+    /// * Returns edge vector
+    fn build_edges(points: &[Vec2f]) -> Vec<Edge> {
         let mut edge_lines = Vec::<Edge>::with_capacity(points.len());
 
         for (left, right) in points.iter().zip({
@@ -82,6 +96,8 @@ impl Sector {
     }
 
     /// Check for point being located in sector
+    /// * `point` - point to test
+    /// * Returns true if this point is contained in the sector
     pub fn contains(&self, point: Vec2f) -> bool {
         let mut sign_collector: u8 = 0;
 
@@ -103,9 +119,8 @@ impl std::fmt::Display for Sector {
             ",
             self.points, self.edges, self.floor, self.ceiling,
         ))
-    }
-}
-
+    } // fn fmt
+} // fn Sector
 
 /// Map representation structure
 pub struct Map {
@@ -115,28 +130,48 @@ pub struct Map {
     pub camera_rotation: f32,
 } // struct Map
 
+/// Map camera info representation structure
+pub struct CameraInfo {
+    pub location: Vec2f,
+    pub height: f32,
+    pub rotation: f32,
+} // sturct CameraInfo
+
+/// Sector unique identifier represetnation structure
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct SectorId(u32);
 
 impl SectorId {
+    /// Sector id from u32 creation function
+    /// * `index` - index of sector to turn into SectorID
+    /// * Returns new SectorID
     pub fn new(index: u32) -> Self {
         Self(index)
-    }
+    } // fn new
 
+    /// SectorID into unique underlying U32 turning function
+    /// * Returns SectorId unique underlying u32
     pub fn as_u32(self) -> u32 {
         self.0
-    }
-}
+    } // fn as_u32
+} // impl SectorId
 
 impl Map {
+    /// Map sector by point finding function
+    /// * `location` - point that must be contained in resulting sector
+    /// * Returns option of identifier of sector that contains `location` point
     pub fn find_sector(&self, location: Vec2f) -> Option<SectorId> {
         self.sectors
             .iter()
             .enumerate()
             .find(|(_, sector)| sector.contains(location))
             .map(|(index, _)| SectorId::new(index as u32))
-    }
+    } // fn find_sector
 
+    /// Map sector with adjacent one finding function
+    /// * `location` - point that must be contained in resulting sector
+    /// * `adjacent_for` - point that resulting sector may be adjacent with
+    /// * Returns option of identifier of sector that contains `location` point
     pub fn find_adjacent_sector(&self, location: Vec2f, adjacent_for: SectorId) -> Option<SectorId> {
         let sector = match self.get_sector(adjacent_for) {
             Some(sector) => sector,
@@ -160,35 +195,57 @@ impl Map {
                 .map(|sector| (id, sector)))
             .find(|(_, sector)| sector.contains(location))
             .map(|(id, _)| id)
-    }
+    } // fn find_adjacent_sector
 
+    /// Trying to find adjacent sector and if not, find any suiting.
+    /// * `location` - location of point resulting sector required to contain
+    /// * `old_sector` - identifier of sector that may be former sector of the `location` point.
+    /// * Returns option of identifier of sector containing `location` point
     pub fn find_sector_from_old(&self, location: Vec2f, old_sector: SectorId) -> Option<SectorId> {
         self.find_adjacent_sector(location, old_sector)
             .or_else(|| self.find_sector(location))
-    }
+    } // pub fn find_sector_from_old
 
+    /// Sector by identifier getting function
+    /// * `id` - sector identifier
+    /// * Returns option of required sector reference.
     pub fn get_sector(&self, id: SectorId) -> Option<&Sector> {
         self.sectors.get(id.as_u32() as usize)
-    }
-}
+    } // fn get_sector
+} // impl Map
 
 /// Map loading error representation structure
 #[derive(Debug)]
 pub enum WmtLoadingError {
+    /// Error during number parsing
     NumberParsingError,
+
+    /// Unknown type of text line
     UnknownLineType(String),
+    /// Invalid index of point
     InvalidPointIndex(u32),
+    /// Some point coordinates missing
     NotEnoughPointCoordinates,
+    /// Some camera parameters missing
     NotEnoughCameraParameters,
+    /// Some sector vertices missing
     NotEnoughSectorVertices,
+
+    /// No adjoint sector for a portal
     NoAdjointSectorForPortal {
+        /// Source sector
         from_sector: u32,
+        /// Indices of edge vertices in sector
         by_indices: (u32, u32),
     },
+    /// Floor is higher that ceiling
     InvalidSectorBounds {
+        /// Floor height
         floor: f32,
+        /// Ceiling height
         ceiling: f32
     },
+    /// Other error
     Other(String),
 } // enum WmtLoadingError
 
@@ -352,5 +409,7 @@ impl Map {
     /// * Returns DoublEndedIterator with SectorId and &Sector items.E
     pub fn iter_indexed_sectors<'a>(&'a self) -> impl DoubleEndedIterator<Item = (SectorId, &'a Sector)> {
         self.sectors.iter().enumerate().map(|(index, sector)| (SectorId::new(index as u32), sector))
-    }
+    } // fn iter_indexed_sectors
 } // impl Map
+
+// file map.rs

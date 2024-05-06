@@ -15,6 +15,12 @@ pub struct Surface<'t> {
 } // struct Surface
 
 impl<'t> Surface<'t> {
+    /// New surface construction function
+    /// * `data` - bits to construct surface on
+    /// * `width` - surface width
+    /// * `height` - surface height
+    /// * `stride` - surface row stride
+    /// * Returns newly created surface
     pub fn new(data: &'t mut [u32], width: usize, height: usize, stride: usize) -> Self {
         Self {
             data,

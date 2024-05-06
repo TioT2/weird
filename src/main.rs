@@ -421,7 +421,7 @@ fn main() {
                                     for (index, count) in monitor.video_modes()
                                         .enumerate()
                                         .map(|(index, mode)|
-                                            (index, (mode.bit_depth() == 32) as u32 + ((mode.refresh_rate_millihertz() == 48000) as u32 + (mode.size() == winit::dpi::PhysicalSize::new(640, 480)) as u32 * 2))
+                                            (index, (mode.bit_depth() == 32) as u32 + ((mode.refresh_rate_millihertz() == 48000) as u32 + (mode.size() == winit::dpi::PhysicalSize::new(320, 200)) as u32 * 2))
                                         ) {
                                         if Some(count) > best_count {
                                             best_count = Some(count);
@@ -497,6 +497,7 @@ fn main() {
                         let mut_buffer_slice = unsafe {
                             std::slice::from_raw_parts_mut(mut_buffer.as_mut_ptr(), mut_buffer.len())
                         };
+
                         // Render main frame
                         render.render(&mut Surface::new(
                             mut_buffer_slice,

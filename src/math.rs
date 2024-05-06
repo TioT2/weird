@@ -1,4 +1,9 @@
-/// 2-component vector representation structure
+/// WEIRD Project
+/// `File` math.rs
+/// `Description` Math utilities implementation module
+/// `Author` TioT2
+/// `Last changed` 05.05.2024
+
 #[derive(Copy, Clone, Debug)]
 pub struct Vec2<T> {
     pub x: T,
@@ -32,4 +37,4 @@ pub struct Ext2<T> {
 
 pub type Vec2f = Vec2<f32>;
 pub type Vec2si = Vec2<isize>;
-pub type Ext2su = Vec2<usize>;
+pub type Ext2su = Ext2<usize>;

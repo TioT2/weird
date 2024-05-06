@@ -122,9 +122,22 @@ impl std::fmt::Display for Sector {
     } // fn fmt
 } // fn Sector
 
+
+/// Map camera state representaiton structure
+pub struct MapCameraState {
+    /// Camera location
+    pub location: Vec2f,
+    /// Camera height
+    pub height: f32,
+    /// Camera rotation angle
+    pub angle: f32,
+} // struct MapCameraState
+
 /// Map representation structure
 pub struct Map {
     sectors: Vec<Sector>,
+
+    /// Map camera parameters
     pub camera_location: Vec2f,
     pub camera_height: f32,
     pub camera_rotation: f32,

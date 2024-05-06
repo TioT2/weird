@@ -1,23 +1,38 @@
+/// WEIRD Project
+/// `File` font.rs
+/// `Description` Font load/save/display implementation module
+/// `Author` TioT2
+/// `Last changed` 05.05.2024
+
 use crate::Surface;
 use crate::math::Ext2;
 
 /// Font representation structure
 pub struct Font {
+    /// Font width in pixels
     width: usize,
+    /// Font height in pixels
     height: usize,
+    /// Some stride of font line in bytes
     stride: usize,
+    /// Stride of single letter in font
     letter_stride: usize,
+    /// Font bits
     bits: Vec<u8>,
 } // struct Font
 
 /// Font loading error
 #[derive(Clone, Debug, PartialEq)]
 pub enum FntLoadingError {
+    /// Inappropriate size of font file data
     InappropriateDataSize { required: usize },
+    /// Inappropriate stride of font
     InappropriateStride { minimal_required: usize },
+    /// Stride is too large to fit in file
     TooLargeStride,
+    /// Unknown error
     Other(String),
-}
+} // enum FntLoadingError
 
 impl Default for Font {
     fn default() -> Self {

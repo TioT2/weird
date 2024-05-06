@@ -1,8 +1,8 @@
 /// WAT3RS Project
-/// `File` render/texture.rs
-/// `Description` Input impementation module
+/// `File` math/timer.rs
+/// `Description` Timer impementation module
 /// `Author` TioT2
-/// `Last changed` 17.02.2024
+/// `Last changed` 05.05.2024
 
 /// Timer representation structure
 pub struct Timer {

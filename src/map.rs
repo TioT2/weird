@@ -14,7 +14,9 @@ pub enum EdgeType {
     /// Wall
     Wall,
     /// Portal to some sector
-    Portal(SectorId),
+    Portal {
+        dst_sector_id: SectorId,
+    },
 } // enum Edge
 
 /// Edgre math data container
@@ -29,14 +31,14 @@ pub struct Edge {
     /// d and p0 cross product
     pub d_cross_p0: f32,
     /// Edge type
-    pub ty: EdgeType, 
+    pub ty: EdgeType,
 } // struct Edge
 
 impl std::fmt::Display for EdgeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Wall => f.write_str("Wall"),
-            Self::Portal(portal) => f.write_fmt(format_args!("Portal({})", portal.as_u32()))
+            Self::Portal{dst_sector_id} => f.write_fmt(format_args!("Portal({})", dst_sector_id.as_u32()))
         }
     } // fn fmt
 } // impl std::fmt::Display for Edge
@@ -198,8 +200,8 @@ impl Map {
         // Try find in adjoint edges or just find if not
         sector.edges
             .iter()
-            .filter_map(|edge| if let EdgeType::Portal(id) = edge.ty {
-                Some(id)
+            .filter_map(|edge| if let EdgeType::Portal{dst_sector_id} = edge.ty {
+                Some(dst_sector_id)
             } else {
                 None
             })
@@ -391,7 +393,9 @@ impl Map {
                                     by_indices: pair.into()
                                 })?;
 
-                            Ok(EdgeType::Portal(SectorId::new(adjoint)))
+                            Ok(EdgeType::Portal {
+                                dst_sector_id: SectorId::new(adjoint)
+                            })
                         }
                     }).collect::<Result<Vec<_>, WmtLoadingError>>()?;
 

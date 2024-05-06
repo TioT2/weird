@@ -169,54 +169,54 @@ impl<'t> Surface<'t> {
             }
         }
     } // fn draw_line
-
     /// Unchecked line draw function
     /// * `x0`, `y0` - first line point
     /// * `x1`, `y1` - second line point
     /// * `color` - color
     pub unsafe fn draw_line_unchecked(&mut self, x0: usize, y0: usize, x1: usize, y1: usize, color: u32) {
-        let (mut dy, sy): (usize, usize) = if y1 < y0 {
+        let (mut delta_y, step_y): (usize, usize) = if y1 < y0 {
             (y0 - y1, self.stride.wrapping_neg())
         } else {
             (y1 - y0, self.stride)
         };
-        let (mut dx, sx): (usize, usize) = if x1 < x0 {
+        let (mut delta_x, step_x): (usize, usize) = if x1 < x0 {
             (x0 - x1, 1usize.wrapping_neg())
         } else {
             (x1 - x0, 1usize)
         };
 
-        let mut pptr = self.data.as_mut_ptr().wrapping_add(y0 * self.stride + x0);
-        pptr.write(color);
+        let mut pixel_ptr = self.data.as_mut_ptr().wrapping_add(y0 * self.stride + x0);
+        pixel_ptr.write(color);
 
-        if dx >= dy {
-            let ie = 2 * dy;
-            let mut f = ie.wrapping_sub(dx);
-            let ine = ie.wrapping_sub(2 * dx);
+        if delta_x >= delta_y {
+            let ie = std::mem::transmute::<usize, isize>(delta_y) << 1;
+            let mut f = ie.wrapping_sub(std::mem::transmute::<usize, isize>(delta_x));
+            let ine = ie.wrapping_sub(std::mem::transmute::<usize, isize>(delta_x) << 1);
 
-            while dx != 0 {
-                pptr = pptr.wrapping_add(sx);
-                pptr.write(color);
-                dx -= 1;
-                if f < std::mem::transmute(isize::MIN) {
-                    pptr = pptr.wrapping_add(sy);
+            while delta_x != 0 {
+                pixel_ptr = pixel_ptr.wrapping_add(step_x);
+                pixel_ptr.write(color);
+                delta_x -= 1;
+
+                if f > 0 {
+                    pixel_ptr = pixel_ptr.wrapping_add(step_y);
                     f = f.wrapping_add(ine);
                 } else {
                     f = f.wrapping_add(ie);
                 }
             }
         } else {
-            let ie = 2 * dx;
-            let mut f = ie.wrapping_sub(dy);
-            let ine = ie.wrapping_sub(2 * dy);
+            let ie = std::mem::transmute::<usize, isize>(delta_x) << 1;
+            let mut f = ie.wrapping_sub(std::mem::transmute::<usize, isize>(delta_y));
+            let ine = ie.wrapping_sub(std::mem::transmute::<usize, isize>(delta_y) << 1);
 
-            while dy != 0 {
-                pptr = pptr.wrapping_add(sy);
-                pptr.write(color);
-                dy -= 1;
+            while delta_y != 0 {
+                pixel_ptr = pixel_ptr.wrapping_add(step_y);
+                pixel_ptr.write(color);
+                delta_y -= 1;
 
-                if f < std::mem::transmute(isize::MIN) {
-                    pptr = pptr.wrapping_add(sx);
+                if f > 0 {
+                    pixel_ptr = pixel_ptr.wrapping_add(step_x);
                     f = f.wrapping_add(ine);
                 } else {
                     f = f.wrapping_add(ie);

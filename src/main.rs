@@ -21,8 +21,8 @@ use camera::Camera;
 
 use input::KeyCode;
 
-/// Renderer representation structure
-struct Render {
+/// Render representation structure
+pub struct Render {
 } // struct Render
 
 struct RenderContext<'a, 'b> where 'b: 'a {
@@ -33,15 +33,20 @@ struct RenderContext<'a, 'b> where 'b: 'a {
     floor_buffer: &'a mut [usize],
     ceil_buffer: &'a mut [usize],
     inv_depth_buffer: &'a mut [f32],
-}
+} // struct RenderContext
 
 impl Render {
     /// Render create function
     pub fn new() -> Render {
         Render {
         }
-    }
+    } // fn new
 
+    /// Sector rendering function
+    /// * `context` - render context
+    /// * `sector_id` - sector to render identifier
+    /// * `screen_x_begin` - screen x clipping area start
+    /// * `screen_x_end` - screen x clipping area end
     fn render_sector(context: &mut RenderContext, sector_id: SectorId, screen_x_begin: usize, screen_x_end: usize) {
         let ext = context.surface.get_extent();
         let stride = context.surface.get_stride();
@@ -68,13 +73,13 @@ impl Render {
                 } else {
                     p0 = Vec2f {
                         x: p0.x - p0.y * (p1.x - p0.x) / (p1.y - p0.y),
-                        y: 0.01,
+                        y: 0.001,
                     };
                 }
             } else if p1.y <= 0.0 {
                 p1 = Vec2f {
                     x: p0.x - p0.y * (p1.x - p0.x) / (p1.y - p0.y),
-                    y: 0.01
+                    y: 0.001
                 };
             }
 
@@ -118,8 +123,8 @@ impl Render {
             };
 
             let neighbour_bounds = match edge.ty {
-                EdgeType::Portal(next_sector_id) => context.map
-                    .get_sector(next_sector_id)
+                EdgeType::Portal{dst_sector_id} => context.map
+                    .get_sector(dst_sector_id)
                     .map(|neighbour_sector| (neighbour_sector.floor, neighbour_sector.ceiling))
                 ,
                 EdgeType::Wall => None,
@@ -198,7 +203,7 @@ impl Render {
                             p_current = p_current.add(stride);
                         }
 
-                        // Don't actually need it
+                        // Don't actually need it, rendering stops at this point
                         // *buf_ceil = ceil_y;
                         // *buf_floor = floor_y;
                     }
@@ -214,12 +219,12 @@ impl Render {
             }
 
             // Deferred neighbour rendering
-            if let EdgeType::Portal(portal_sector_id) = edge.ty {
+            if let EdgeType::Portal{ dst_sector_id } = edge.ty {
                 context.visit_stack.push_back(sector_id);
 
-                if !context.visit_stack.contains(&portal_sector_id) {
+                if !context.visit_stack.contains(&dst_sector_id) {
                     if xp1 - xp0 > 0 {
-                        Self::render_sector(context, portal_sector_id, xp0, xp1);
+                        Self::render_sector(context, dst_sector_id, xp0, xp1);
                     }
                 }
 
@@ -269,7 +274,6 @@ impl Render {
     /// Next frame rendering function
     /// `surface` - surface to render frame to
     /// `map` - map to render
-    #[allow(unused)]
     pub fn render_minimap(&mut self, surface: &mut Surface, map: &Map, camera: &Camera, camera_sector: SectorId) {
         let ext = surface.get_extent();
         let mut render_sector = |sector: &Sector, color_scale: u32| {
@@ -281,7 +285,7 @@ impl Render {
                 // Project edge to pixel space and render, actually
                 let edge_color = match edge.ty {
                     EdgeType::Wall => 0x001100,
-                    EdgeType::Portal(_) => 0x110000,
+                    EdgeType::Portal { .. } => 0x110000,
                 } * color_scale;
 
                 /*unsafe*/ {
@@ -300,8 +304,8 @@ impl Render {
             let adjacent_sectors = sector.edges
                 .iter()
                 .filter_map(|edge| {
-                    if let EdgeType::Portal(sector_id) = edge.ty {
-                        Some(sector_id)
+                    if let EdgeType::Portal{dst_sector_id} = edge.ty {
+                        Some(dst_sector_id)
                     } else {
                         None
                     }
@@ -421,7 +425,7 @@ fn main() {
                                     for (index, count) in monitor.video_modes()
                                         .enumerate()
                                         .map(|(index, mode)|
-                                            (index, (mode.bit_depth() == 32) as u32 + ((mode.refresh_rate_millihertz() == 48000) as u32 + (mode.size() == winit::dpi::PhysicalSize::new(320, 200)) as u32 * 2))
+                                            (index, (mode.bit_depth() == 32) as u32 + ((mode.refresh_rate_millihertz() == 48000) as u32 + (mode.size() == winit::dpi::PhysicalSize::new(640, 480)) as u32 * 2))
                                         ) {
                                         if Some(count) > best_count {
                                             best_count = Some(count);
@@ -497,6 +501,22 @@ fn main() {
                         let mut_buffer_slice = unsafe {
                             std::slice::from_raw_parts_mut(mut_buffer.as_mut_ptr(), mut_buffer.len())
                         };
+
+                        unsafe {
+                            static mut T: Option<std::time::Instant> = None;
+
+                            if let Some(time) = T {
+                                let now = std::time::Instant::now();
+                                let delta = now.duration_since(time);
+
+                                if delta.as_secs_f32() > 1.0 {
+                                    T = Some(now);
+                                    println!("{}", timer.get_fps());
+                                }
+                            } else {
+                                T = Some(std::time::Instant::now());
+                            }
+                        }
 
                         // Render main frame
                         render.render(&mut Surface::new(

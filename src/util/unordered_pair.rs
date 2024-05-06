@@ -46,4 +46,3 @@ impl<T> Into<(T, T)> for UnorderedPair<T> {
 } // impl From for UnorderedPair
 
 // file unordered_pair.rs
-

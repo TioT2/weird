@@ -5,7 +5,7 @@
 /// `Last changed` 07.05.2024
 
 /// 16.16 fixed number representation structure
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Fixed {
     /// Fixed number bits
     value: u32,
@@ -54,9 +54,13 @@ impl std::ops::Mul<Fixed> for Fixed {
 impl std::ops::Div<Fixed> for Fixed {
     type Output = Fixed;
     fn div(self, rhs: Fixed) -> Self::Output {
+        let r = (unsafe { std::mem::transmute::<u32, i32>(self.value) as f32 } / unsafe { std::mem::transmute::<u32, i32>(rhs.value) } as f32) * 65536.0;
         Self::Output {
-            value: (((self.value as u64) << 16).wrapping_div(rhs.value as u64)) as u32
+            value: unsafe { std::mem::transmute::<i32, u32>(r as i32) },
         }
+        // Self::Output {
+        //     value: (((unsafe { std::mem::transmute::<u32, i32>(self.value) } as i64) << 16).wrapping_div(unsafe { std::mem::transmute::<u32, i32>(rhs.value) } as i64)) as u32
+        // }
     }
 }
 
@@ -64,7 +68,7 @@ impl std::ops::Neg for Fixed {
     type Output = Fixed;
     fn neg(self) -> Self::Output {
         Self::Output {
-            value: self.value.wrapping_neg()
+            value: self.value.wrapping_neg().wrapping_sub(1)
         }
     }
 }
@@ -146,6 +150,22 @@ impl Fixed {
         }
     } // fn into_f32
 
+    /// Fixed-point number from u16 constructor
+    /// * `value` - 16 bit signed integral value to construct Fixed from
+    /// * Returns fixed that represents `value` number
+    pub const fn from_i16(value: i16) -> Self {
+        Fixed {
+            value: unsafe { std::mem::transmute::<i32, u32>((value as i32) << 16) },
+        }
+    } // fn from_i16
+
+    /// Fixed-point number from u16 constructor
+    /// * `value` - 16 bit signed integral value to construct Fixed from
+    /// * Returns fixed that represents `value` number
+    pub const fn into_i16(self) -> i16 {
+        (self.value >> 16) as i16
+    } // fn from_i16
+
     /// Rounding function, rounds to nearest to zero
     /// * Returns rounded fixed-point number
     pub const fn round(self) -> Self {
@@ -157,6 +177,28 @@ impl Fixed {
     pub const fn fract(self) -> Self {
         Self { value: self.value & 0xFFFF, }
     } // fn fract
+
+    /// Absolute value calculation function
+    /// * Returns module.
+    pub const fn abs(self) -> Fixed {
+        Fixed {
+            value: self.value ^ unsafe { std::mem::transmute::<i32, u32>(std::mem::transmute::<u32, i32>((self.value as u32) << 16) >> 31) },
+        }
+    } // fn abs
+
+    /// Approximate distance calculation function
+    /// * `dx` - delta by x axis
+    /// * `dy` - delta by y axis
+    /// * Returns approximate dx, dy vector length
+    pub const fn approx_distance(mut dx: Fixed, mut dy: Fixed) -> Fixed {
+        dx = dx.abs();
+        dy = dy.abs();
+        if unsafe { std::mem::transmute::<u32, i32>(dx.value) < std::mem::transmute::<u32, i32>(dy.value) } {
+            Fixed { value: dx.value + dy.value - (dx.value >> 1) }
+        } else {
+            Fixed { value: dx.value + dy.value - (dy.value >> 1) }
+        }
+    }
 } // impl Fixed
 
 
@@ -164,6 +206,8 @@ impl Fixed {
 pub const MIN: Fixed = Fixed::from_bits(0x80000000);
 /// Maximal fixed value possible
 pub const MAX: Fixed = Fixed::from_bits(0xFFFFFFFF);
+/// Maximal fixed value possible
+pub const EPSILON: Fixed = Fixed::from_bits(1);
 
 /// Fixed point constant module
 pub mod consts {
@@ -190,7 +234,7 @@ const SIN_QUART: [Fixed; 16384] = {
 };
 
 /// Angle representaiton structure
-#[derive(Copy, Clone, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct Angle {
     /// Angle actual value
     value: u16,
@@ -219,6 +263,13 @@ impl Angle {
         Self {
             value: (((radians / (std::f32::consts::PI * 2.0)).fract() + 1.0).fract() * 65536.0) as u16
         }
+    } // fn from_radians_f32
+
+    /// From radians contained in float32 number angle construction function
+    /// * `radians` - radians in floating point
+    /// * Returns angle
+    pub fn into_radians_f32(self) -> f32 {
+        self.value as f32 * std::f32::consts::PI / 65536.0
     } // fn from_radians_f32
 
     /// Angle sine calculation function

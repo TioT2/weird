@@ -448,7 +448,7 @@ fn main() {
                                 input.get_mouse_motion().x * (input.is_key_pressed(KeyCode::F30)) as i32 as f32;
                             let oy = (input.is_key_pressed(KeyCode::KeyW) as i32 - input.is_key_pressed(KeyCode::KeyS) as i32) as f32;
                             let oz = (input.is_key_pressed(KeyCode::KeyR) as i32 - input.is_key_pressed(KeyCode::KeyF) as i32) as f32;
-                            let strafe = input.is_key_pressed(KeyCode::AltLeft);
+                            let strafe = input.is_key_pressed(KeyCode::AltLeft) || input.is_key_pressed(KeyCode::AltRight);
 
                             if ox == 0.0 && oy == 0.0 && oz == 0.0 {
                                 break 'input_control;
@@ -471,6 +471,8 @@ fn main() {
                                 x: camera.location.x + camera_location_delta.x * dt,
                                 y: camera.location.y + camera_location_delta.y * dt,
                             };
+
+                            // Fixed DT For proper check
                             let new_test_location = Vec2f {
                                 x: camera.location.x + camera_location_delta.x * 0.01,
                                 y: camera.location.y + camera_location_delta.y * 0.01,
@@ -486,10 +488,10 @@ fn main() {
                                         new_rotation,
                                     );
                                 } else {
-                                    if new_height >= new_camera_sector.floor && new_height <= new_camera_sector.ceiling {
+                                    if camera.height >= new_camera_sector.floor && camera.height <= new_camera_sector.ceiling {
                                         camera.set_location(
                                             new_location,
-                                            new_height,
+                                            new_height.clamp(new_camera_sector.floor, new_camera_sector.ceiling),
                                             new_rotation,
                                         );
                                         camera_sector_id = new_camera_sector_id;

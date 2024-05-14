@@ -10,18 +10,18 @@ pub struct Vec2<T> {
     pub y: T,
 }
 
+impl<T: std::fmt::Display> std::fmt::Display for Vec2<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("<{}, {}>", self.x, self.y))
+    }
+} // impl std::fmt::Display for Vec2
+
 #[derive(Copy, Clone, Debug)]
 pub struct Vec3<T> {
     pub x: T,
     pub y: T,
     pub z: T,
 }
-
-impl<T: std::fmt::Display> std::fmt::Display for Vec2<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("<{}, {}>", self.x, self.y))
-    }
-} // impl std::fmt::Display for Vec2
 
 impl<T: std::fmt::Display> std::fmt::Display for Vec3<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -331,8 +331,8 @@ impl<'t> Surface<'t> {
     /// * Returns surface extent
     pub fn get_extent(&self) -> Ext2<usize> {
         Ext2 {
-            width: self.width,
-            height: self.height,
+            w: self.width,
+            h: self.height,
         }
     } // fn get_extent
 

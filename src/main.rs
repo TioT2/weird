@@ -79,12 +79,12 @@ impl Render {
             } else if p1.y <= 0.0 {
                 p1 = Vec2f {
                     x: p0.x - p0.y * (p1.x - p0.x) / (p1.y - p0.y),
-                    y: 0.001
+                    y: 0.001,
                 };
             }
 
             let to_screen_x = |p: Vec2f| -> isize {
-                ((p.x / p.y / 2.0 + 0.5) * ext.width as f32) as isize
+                ((p.x / p.y * 0.5 + 0.5) * ext.w as f32) as isize
             };
 
 
@@ -108,25 +108,18 @@ impl Render {
 
             // Edge normal and distance form user to edge
             let (edge_norm, inv_edge_distance) = {
-                let edge_norm_unorm = Vec2f {
+                let edge_norm = Vec2f {
                     x: p1.y - p0.y,
                     y: p0.x - p1.x,
-                };
+                }.normalized();
 
-                let edge_line_inv_norm = 1.0 / (edge_norm_unorm.x * edge_norm_unorm.x + edge_norm_unorm.y * edge_norm_unorm.y).sqrt();
-                let edge_norm = Vec2f {
-                    x: edge_norm_unorm.x * edge_line_inv_norm,
-                    y: edge_norm_unorm.y * edge_line_inv_norm,
-                };
-
-                (edge_norm, 1.0 / (edge_norm.x * p0.x + edge_norm.y * p0.y).abs())
+                (edge_norm, 1.0 / (edge_norm ^ p0).abs())
             };
 
             let neighbour_bounds = match edge.ty {
                 EdgeType::Portal{dst_sector_id} => context.map
                     .get_sector(dst_sector_id)
-                    .map(|neighbour_sector| (neighbour_sector.floor, neighbour_sector.ceiling))
-                ,
+                    .map(|neighbour_sector| (neighbour_sector.floor, neighbour_sector.ceiling)),
                 EdgeType::Wall => None,
             };
 
@@ -134,7 +127,7 @@ impl Render {
 
             for x in xp0..xp1 {
                 let pixel_dir = Vec2f {
-                    x: x as f32 / ext.width as f32 * 2.0 - 1.0,
+                    x: x as f32 / ext.w as f32 * 2.0 - 1.0,
                     y: 1.0,
                 };
 
@@ -142,7 +135,7 @@ impl Render {
                 let inv_distance = (pixel_dir.x * edge_norm.x + pixel_dir.y * edge_norm.y).abs() * inv_edge_distance;
 
                 let to_screen_height = |height: f32| -> usize {
-                    ((((context.camera.height - height) * inv_distance + 1.0) / 2.0 * ext.height as f32) as isize).clamp(0, ext.height as isize) as usize
+                    ((((context.camera.height - height) * inv_distance + 1.0) / 2.0 * ext.h as f32) as isize).clamp(0, ext.h as isize) as usize
                 };
 
                 let mut ceil_y = to_screen_height(sector.ceiling);
@@ -204,8 +197,8 @@ impl Render {
                         }
 
                         // Don't actually need it, rendering stops at this point
-                        // *buf_ceil = ceil_y;
-                        // *buf_floor = floor_y;
+                            // *buf_ceil = ceil_y;
+                            // *buf_floor = floor_y;
                     }
 
                     *context.inv_depth_buffer.get_unchecked_mut(x) = inv_distance;
@@ -243,20 +236,21 @@ impl Render {
         if map.get_sector(sector_id).is_some() {
             let ext = surface.get_extent();
             let mut floor_buffer = {
-                let mut buffer = Vec::with_capacity(ext.width);
-                buffer.resize(ext.width, ext.height);
+                let mut buffer = Vec::with_capacity(ext.w);
+                buffer.resize(ext.w, ext.h);
                 buffer
             };
             let mut ceil_buffer = {
-                let mut buffer = Vec::with_capacity(ext.width);
-                buffer.resize(ext.width, 0usize);
+                let mut buffer = Vec::with_capacity(ext.w);
+                buffer.resize(ext.w, 0usize);
                 buffer
             };
             let mut inv_depth_buffer = {
-                let mut buffer = Vec::with_capacity(ext.width);
-                buffer.resize(ext.width, 0f32);
+                let mut buffer = Vec::with_capacity(ext.w);
+                buffer.resize(ext.w, 0f32);
                 buffer
             };
+
             let mut context = RenderContext {
                 map,
                 camera,
@@ -267,7 +261,7 @@ impl Render {
                 surface,
             };
 
-            Self::render_sector(&mut context, sector_id, 0, ext.width);
+            Self::render_sector(&mut context, sector_id, 0, ext.w);
         }
     } // fn next_frame
 
@@ -288,15 +282,13 @@ impl Render {
                     EdgeType::Portal { .. } => 0x110000,
                 } * color_scale;
 
-                /*unsafe*/ {
-                    surface.draw_line(
-                        ext.width  as isize / 2 + (p0.x * 6.0) as isize,
-                        ext.height as isize / 2 - (p0.y * 6.0) as isize,
-                        ext.width  as isize / 2 + (p1.x * 6.0) as isize,
-                        ext.height as isize / 2 - (p1.y * 6.0) as isize,
-                        edge_color,
-                    );
-                }
+                surface.draw_line(
+                    ext.w as isize / 2 + (p0.x * 6.0) as isize,
+                    ext.h as isize / 2 - (p0.y * 6.0) as isize,
+                    ext.w as isize / 2 + (p1.x * 6.0) as isize,
+                    ext.h as isize / 2 - (p1.y * 6.0) as isize,
+                    edge_color,
+                );
             }
         };
 
@@ -322,7 +314,7 @@ impl Render {
         }
 
         // Render player
-        let (x0, y0) = ((ext.width / 2) as isize, (ext.height / 2) as isize);
+        let (x0, y0) = ((ext.w / 2) as isize, (ext.h / 2) as isize);
 
         surface.draw_bar( x0 - 1, y0 - 1, x0 + 2, y0 + 2, 0xFFFFFF);
         surface.draw_line( x0, y0, x0, y0 - 5, 0xFFFFFF);
@@ -504,21 +496,19 @@ fn main() {
                             std::slice::from_raw_parts_mut(mut_buffer.as_mut_ptr(), mut_buffer.len())
                         };
 
-                        unsafe {
-                            static mut T: Option<std::time::Instant> = None;
-
-                            if let Some(time) = T {
-                                let now = std::time::Instant::now();
-                                let delta = now.duration_since(time);
-
-                                if delta.as_secs_f32() > 1.0 {
-                                    T = Some(now);
-                                    println!("{}", timer.get_fps());
-                                }
-                            } else {
-                                T = Some(std::time::Instant::now());
-                            }
-                        }
+                        // unsafe {
+                        //     static mut T: Option<std::time::Instant> = None;
+                        //     if let Some(time) = T {
+                        //         let now = std::time::Instant::now();
+                        //         let delta = now.duration_since(time);
+                        //         if delta.as_secs_f32() > 1.0 {
+                        //             T = Some(now);
+                        //             println!("{}", timer.get_fps());
+                        //         }
+                        //     } else {
+                        //         T = Some(std::time::Instant::now());
+                        //     }
+                        // }
 
                         // Render main frame
                         render.render(&mut Surface::new(
@@ -540,10 +530,11 @@ fn main() {
                         render.render_minimap(&mut minimap_surface, &map, &camera, camera_sector_id);
 
                         let font_size = font.get_letter_size();
-                        font.put_string(&mut minimap_surface, 4, (font_size.height + 1) * 0 + 4, format!("FPS: {}", timer.get_fps()).as_str(), 0xFFFFFF);
-                        font.put_string(&mut minimap_surface, 4, (font_size.height + 1) * 1 + 4, format!("X: {}", camera.location.x).as_str(), 0xFFFFFF);
-                        font.put_string(&mut minimap_surface, 4, (font_size.height + 1) * 2 + 4, format!("Y: {}", camera.location.y).as_str(), 0xFFFFFF);
-                        font.put_string(&mut minimap_surface, 4, (font_size.height + 1) * 3 + 4, format!("H: {}", camera.height    ).as_str(), 0xFFFFFF);
+                        font.put_string(&mut minimap_surface, 4, (font_size.h + 1) * 0 + 4, format!("FPS: {}", timer.get_fps()).as_str(), 0xFFFFFF);
+                        font.put_string(&mut minimap_surface, 4, (font_size.h + 1) * 1 + 4, format!("X: {}", camera.location.x).as_str(), 0xFFFFFF);
+                        font.put_string(&mut minimap_surface, 4, (font_size.h + 1) * 2 + 4, format!("Y: {}", camera.location.y).as_str(), 0xFFFFFF);
+                        font.put_string(&mut minimap_surface, 4, (font_size.h + 1) * 3 + 4, format!("H: {}", camera.height    ).as_str(), 0xFFFFFF);
+                        font.put_string(&mut minimap_surface, 4, (font_size.h + 1) * 4 + 4, format!("R: {}", camera.rotation  ).as_str(), 0xFFFFFF);
 
                         _ = mut_buffer.present();
 

@@ -104,7 +104,7 @@ impl Font {
             };
 
             // Break the loop if have to enough space to print next letter
-            if (index + 1) * (self.width + 1) - 1 + x >= ext.width {
+            if (index + 1) * (self.width + 1) - 1 + x >= ext.w {
                 break;
             }
 
@@ -136,8 +136,8 @@ impl Font {
     /// * Returns letter extnet
     pub fn get_letter_size(&self) -> Ext2<usize> {
         Ext2 {
-            width: self.width,
-            height: self.height,
+            w: self.width,
+            h: self.height,
         }
     } // pub fn size
 } // impl Font

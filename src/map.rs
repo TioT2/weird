@@ -19,7 +19,7 @@ pub enum EdgeType {
     },
 } // enum Edge
 
-/// Edgre math data container
+/// Edge math data container
 #[derive(Copy, Clone, Debug)]
 pub struct Edge {
     /// Edge first point position
@@ -360,7 +360,8 @@ impl Map {
         }
 
         // Parse data parsed from file
-        let sectors = sectors.iter()
+        let sectors = sectors
+            .iter()
             .enumerate()
             .map(|(sector_index, sector)| -> Result<Sector, WmtLoadingError> {
                 let points = sector.point_indices.iter()

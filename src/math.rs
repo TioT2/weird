@@ -225,7 +225,7 @@ impl_extn!(Ext3, w, h, d);
 impl_rectn!(Rect, Vec2, Ext2, x, y);
 impl_rectn!(Box, Vec3, Ext3, x, y, z);
 
-pub type Ext2f32 = Ext2<f32>;
+pub type Ext2f = Ext2<f32>;
 pub type Vec2f = Vec2<f32>;
 pub type Vec3f = Vec3<f32>;
 

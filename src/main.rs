@@ -13,6 +13,9 @@ pub mod map;
 pub mod font;
 pub mod surface;
 
+
+pub mod nmap;
+
 use font::Font;
 use map::*;
 use math::*;
@@ -131,22 +134,19 @@ impl Render {
                     y: 1.0,
                 };
 
-                // edge_distance
+                // Inverse distance to pixel
                 let inv_distance = (pixel_dir.x * edge_norm.x + pixel_dir.y * edge_norm.y).abs() * inv_edge_distance;
 
                 let to_screen_height = |height: f32| -> usize {
                     ((((context.camera.height - height) * inv_distance + 1.0) / 2.0 * ext.h as f32) as isize).clamp(0, ext.h as isize) as usize
                 };
 
-                let mut ceil_y = to_screen_height(sector.ceiling);
-                let mut floor_y = to_screen_height(sector.floor);
-
                 unsafe {
                     let buf_floor = context.floor_buffer.get_unchecked_mut(x);
                     let buf_ceil = context.ceil_buffer.get_unchecked_mut(x);
 
-                    ceil_y = ceil_y.clamp(*buf_ceil, *buf_floor);
-                    floor_y = floor_y.clamp(*buf_ceil, *buf_floor);
+                    let ceil_y = to_screen_height(sector.ceiling).clamp(*buf_ceil, *buf_floor);
+                    let floor_y = to_screen_height(sector.floor).clamp(*buf_ceil, *buf_floor);
 
                     let p_base = surface_data_ptr.add(x);
                     let p_ceil = p_base.add(stride * ceil_y);
@@ -343,6 +343,20 @@ fn main() {
         .and_then(|arg| std::fs::read_to_string(arg).ok())
         .unwrap_or(include_str!("../maps/default.wmt").into());
     let map = Map::load_from_wmt(map_name.as_str()).unwrap();
+
+    // for (id, sector) in map.iter_indexed_sectors() {
+    //     print!("s{}:{}/{}[", id.as_u32(), sector.floor, sector.ceiling);
+    //     for edge in &sector.edges {
+    //         if let map::EdgeType::Portal { dst_sector_id } = edge.ty {
+    //             print!("{}/{}:s{}, ", edge.p0.x, edge.p0.y, dst_sector_id.as_u32());
+    //         } else {
+    //             print!("{}/{}, ", edge.p0.x, edge.p0.y);
+    //         }
+    //     }
+    //     println!("]");
+    // }
+    // return;
+
     let mut camera = Camera::new();
 
     camera.set_location(map.camera_location, 0.5, map.camera_rotation);
@@ -535,6 +549,7 @@ fn main() {
                         font.put_string(&mut minimap_surface, 4, (font_size.h + 1) * 2 + 4, format!("Y: {}", camera.location.y).as_str(), 0xFFFFFF);
                         font.put_string(&mut minimap_surface, 4, (font_size.h + 1) * 3 + 4, format!("H: {}", camera.height    ).as_str(), 0xFFFFFF);
                         font.put_string(&mut minimap_surface, 4, (font_size.h + 1) * 4 + 4, format!("R: {}", camera.rotation  ).as_str(), 0xFFFFFF);
+                        font.put_string(&mut minimap_surface, 4, (font_size.h + 1) * 5 + 4, format!("Sector: {}", camera_sector_id.as_u32()).as_str(), 0xFFFFFF);
 
                         _ = mut_buffer.present();
 

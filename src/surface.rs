@@ -5,7 +5,6 @@
 /// `Last changed` 04.05.2024
 
 use crate::Ext2;
-use crate::util::fixed::Fixed;
 
 /// Software rendering surface representation structure
 pub struct Surface<'t> {
@@ -67,94 +66,6 @@ impl<'t> Surface<'t> {
             self.draw_bar_unchecked(x0, y0, x1, y1, color);
         }
     } // fn draw_bar
-
-    /// Line clipping in on (0, 0, width, height) rectangle function
-    /// * `x0`, `y0` - first line point position
-    /// * `x1`, `y1` - second line point position
-    /// * `w`, `h` - clipping surface size
-    /// * Returns (optionally, line can be clipped fully), clipped line points, granted, that they are contained in (0, 0, w, h) rectangle.
-    fn fixed_clip_line(mut x0: Fixed, mut y0: Fixed, mut x1: Fixed, mut y1: Fixed, w: Fixed, h: Fixed) -> Option<(usize, usize, usize, usize)> {
-        // Clip line
-        const LOC_INSIDE: u32 = 0;
-        const LOC_LEFT: u32 = 1;
-        const LOC_RIGHT: u32 = 2;
-        const LOC_BOTTOM: u32 = 4;
-        const LOC_TOP: u32 = 8;
-
-        let get_point_code = |x: Fixed, y: Fixed| {
-            let mut code = LOC_INSIDE;
-
-            if x < Fixed::zero() { code |= LOC_LEFT; }
-            if x > w { code |= LOC_RIGHT; }
-            if y < Fixed::zero() { code |= LOC_TOP; }
-            if y > h { code |= LOC_BOTTOM; }
-
-            code
-        };
-
-        let mut code_0 = get_point_code(x0, y0);
-        let mut code_1 = get_point_code(x1, y1);
-
-        if 'intersection_loop: loop {
-            if (code_0 | code_1) == LOC_INSIDE {
-                break 'intersection_loop true;
-            }
-
-            if (code_0 & code_1) != LOC_INSIDE {
-                break 'intersection_loop false;
-            }
-
-            let out_code = if code_0 != LOC_INSIDE {
-                code_0
-            } else {
-                code_1
-            };
-
-            let dx = x1 - x0;
-            let dy = y1 - y0;
-
-            let px;
-            let py;
-
-            if out_code & LOC_TOP != 0 {
-                px = x0 - dx * y0 / dy;
-                py = crate::util::fixed::EPSILON;
-            } else if out_code & LOC_BOTTOM != 0 {
-                px = x0 + dx * (h - y0) / dy;
-                py = h;
-            } else if out_code & LOC_LEFT != 0 {
-                px = crate::util::fixed::EPSILON;
-                py = y0 - dy * x0 / dx;
-            } else if out_code & LOC_RIGHT != 0 {
-                px = w;
-                py = y0 + dy * (w - x0) / dx;
-            } else {
-                break 'intersection_loop false;
-            }
-
-            if out_code == code_0 {
-                x0 = px;
-                y0 = py;
-                code_0 = get_point_code(x0, y0);
-            } else {
-                x1 = px;
-                y1 = py;
-                code_1 = get_point_code(x1, y1);
-            }
-        } {
-            // Clipped values are safe to transmute into unsigned
-            unsafe {
-                Some((
-                    std::mem::transmute::<isize, usize>(x0.into_i16() as isize),
-                    std::mem::transmute::<isize, usize>(y0.into_i16() as isize),
-                    std::mem::transmute::<isize, usize>(x1.into_i16() as isize),
-                    std::mem::transmute::<isize, usize>(y1.into_i16() as isize),
-                ))
-            }
-        } else {
-            None
-        }
-    } // fn fixed_clip_line
 
     /// Line clipping in on (0, 0, width, height) rectangle function
     /// * `x0`, `y0` - first line point position

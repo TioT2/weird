@@ -4,8 +4,7 @@
 /// `Author` TioT2
 /// `Last changed` 04.05.2024
 
-use std::collections::HashSet;
-use crate::util::unordered_pair::UnorderedPair;
+use std::collections::BTreeMap;
 use crate::math::*;
 
 /// Sector type representation structure
@@ -27,12 +26,34 @@ pub struct Edge {
     /// Edge second point position
     pub p1: Vec2f,
     /// p0 -> p1 direction
-    pub d: Vec2f,
+    pub direction: Vec2f,
     /// d and p0 cross product
     pub d_cross_p0: f32,
     /// Edge type
     pub ty: EdgeType,
 } // struct Edge
+
+impl Edge {
+    /// New edge create function
+    /// * `p0` - first point
+    /// * `p1` - second point
+    /// * `ty` - edge type
+    /// * Returns new edge
+    pub fn new(p0: Vec2f, p1: Vec2f, ty: EdgeType) -> Self {
+        let direction = p1 - p0;
+        Self { p0, p1, d_cross_p0: direction % p0, direction, ty }
+    } // fn new
+
+    /// Build edge loop from points
+    /// * `points` - point iterator
+    /// * Returns edge iterator
+    pub fn loop_from_points(points: impl Iterator<Item = (Vec2f, EdgeType)> + Clone) -> impl Iterator<Item = Edge> {
+        points
+            .clone()
+            .zip(points.map(|t| t.0).cycle().skip(1))
+            .map(|((left, ty), right)| Edge::new(left, right, ty))
+    } // fn loop_from_points
+}
 
 impl std::fmt::Display for EdgeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -45,9 +66,7 @@ impl std::fmt::Display for EdgeType {
 
 /// Sector representation structure
 pub struct Sector {
-    /// Sector point set
-    pub points: Vec<Vec2f>,
-    /// TODO Order
+    /// Sector edge set
     pub edges: Vec<Edge>,
     /// Floor height
     pub floor: f32,
@@ -59,53 +78,19 @@ impl Sector {
     /// Sector with loop of walls representation structure
     /// * `points` - set of points forming sector, points polygon convexity required
     /// * Returns sector with `points` points
-    pub fn wall_loop(points: &[Vec2f]) -> Self {
+    pub fn wall_loop(points: impl Iterator<Item = Vec2f> + Clone) -> Self {
         Self {
-            points: points.into(),
-            edges: Sector::build_edges(points),
+            edges: Edge::loop_from_points(points.map(|v| (v, EdgeType::Wall))).collect(),
             floor: 0.0,
             ceiling: 1.0,
         }
     } // fn wall_loop
 
-    /// Edges from points building function
-    /// * `points` - points to build edges from
-    /// * Returns edge vector
-    fn build_edges(points: &[Vec2f]) -> Vec<Edge> {
-        let mut edge_lines = Vec::<Edge>::with_capacity(points.len());
-
-        for (left, right) in points.iter().zip({
-            let pit = points.iter();
-            let mut pit = pit.cycle();
-            pit.next();
-            pit
-        }) {
-            let d = Vec2f {
-                x: right.x - left.x,
-                y: right.y - left.y,
-            };
-
-            edge_lines.push(Edge {
-                p0: *left,
-                p1: *right,
-                d_cross_p0: d.x * left.y - d.y * left.x,
-                d,
-                ty: EdgeType::Wall,
-            });
-        }
-
-        edge_lines
-    }
-
     /// Check for point being located in sector
     /// * `point` - point to test
     /// * Returns true if this point is contained in the sector
     pub fn contains(&self, point: Vec2f) -> bool {
-        let mut sign_collector: u8 = 0;
-
-        for line in &self.edges {
-            sign_collector |= 1 << (unsafe { std::mem::transmute::<f32, u32>(line.d.x * point.y - line.d.y * point.x - line.d_cross_p0) } >> 31);
-        }
+        let sign_collector = self.edges.iter().fold(0u8, |state, line| state | (1 << (unsafe { std::mem::transmute::<f32, u32>(line.direction.x * point.y - line.direction.y * point.x - line.d_cross_p0) } >> 31)));
 
         sign_collector != 0 && sign_collector != 3//((sign_collector & 0x1) ^ (sign_collector >> 1)) != 0
     } // pub fn is_in
@@ -115,11 +100,10 @@ impl std::fmt::Display for Sector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "\
-            points: {:?}\n\
             edges: {:?}\n\
             bounds: [{}; {}]\n\
             ",
-            self.points, self.edges, self.floor, self.ceiling,
+            self.edges, self.floor, self.ceiling,
         ))
     } // fn fmt
 } // fn Sector
@@ -229,198 +213,159 @@ impl Map {
     } // fn get_sector
 } // impl Map
 
-/// Map loading error representation structure
-#[derive(Debug)]
-pub enum WmtLoadingError {
-    /// Error during number parsing
-    NumberParsingError,
+#[derive(Debug, Clone)]
+pub enum Wmt2LoadingError {
+    /// Unknown directive
+    UnknownDirective(String),
 
-    /// Unknown type of text line
-    UnknownLineType(String),
-    /// Invalid index of point
-    InvalidPointIndex(u32),
-    /// Some point coordinates missing
-    NotEnoughPointCoordinates,
-    /// Some camera parameters missing
+    /// Floating point parsing error
+    FloatParsingError(std::num::ParseFloatError),
+
+    /// No enough camera parameter
     NotEnoughCameraParameters,
-    /// Some sector vertices missing
-    NotEnoughSectorVertices,
 
-    /// No adjoint sector for a portal
-    NoAdjointSectorForPortal {
-        /// Source sector
-        from_sector: u32,
-        /// Indices of edge vertices in sector
-        by_indices: (u32, u32),
-    },
-    /// Floor is higher that ceiling
-    InvalidSectorBounds {
-        /// Floor height
-        floor: f32,
-        /// Ceiling height
-        ceiling: f32
-    },
-    /// Other error
+    /// No sector boundaries at all
+    NoSectorBoundaries,
+
+    /// No sector edges starting symbol
+    NoSectorEdgesStart,
+
+    /// Not enough points for some kind of coordinates
+    NotEnoughPointCoordinates,
+
+    /// Sector with value not
+    UnknownSectorReferenced(String),
+
+    /// Some other error
     Other(String),
-} // enum WmtLoadingError
+} //
 
 impl Map {
-    /// Map from .wmt file loading function
-    /// * `source` - file text
-    /// * Returns valid Map or WmtLoadingError
-    pub fn load_from_wmt(source: &str) -> Result<Map, WmtLoadingError> {
-        struct SectorData {
-            pub point_indices: Vec<u32>,
-            pub floor: f32,
-            pub ceiling: f32,
-            pub walls: HashSet<UnorderedPair<u32>>,
+    pub fn load_from_wmt(source: &str) -> Result<Map, Wmt2LoadingError> {
+        enum ChunkType {
+            Sector,
+            Camera,
+            None,
         }
-        let mut points = Vec::<Vec2f>::new();
-        let mut walls = HashSet::<UnorderedPair<u32>>::new();
-        let mut sectors = Vec::<SectorData>::new();
-        let mut camera_location = Vec2f {
-            x: 0.0,
-            y: 0.0,
+        let mut mode = ChunkType::None;
+        let mut camera = CameraInfo {
+            location: Vec2f::new(0.0, 0.0),
+            height: 0.3,
+            rotation: 0.0,
         };
-        let mut camera_height = 0.0;
-        let mut camera_rotation = 0.0;
 
-        // Parse file data
-        for line in source.lines().map(|line| line.trim()) {
-            let mut elem = line.split(' ');
+        struct RawSectorPoint {
+            base_point: Vec2f,
+            dst_sector_name: Option<String>,
+        }
 
-            let line_type = match elem.next() {
-                Some(s) => s,
-                None => continue,
-            };
+        struct RawSector {
+            floor: f32,
+            ceiling: f32,
+            points: Vec<RawSectorPoint>,
+        }
 
-            match line_type {
-                // Comment | Empty line
-                "#" | "" => {}
+        let mut raw_sectors = BTreeMap::new();
 
-                // Point
-                "p" | "point" => {
-                    let (sx, sy) = elem.next().zip(elem.next()).ok_or(WmtLoadingError::NotEnoughPointCoordinates)?;
-                    let (x, y) = sx.parse::<f32>().ok().zip(sy.parse::<f32>().ok()).ok_or(WmtLoadingError::NumberParsingError)?;
+        for mut line in source.lines() {
+            // Cut comments
+            if let Some(i) = line.find("//") {
+                line = line.split_at(i).0
+            }
+            let line = line.chars().filter(|v| !v.is_whitespace()).collect::<String>();
 
-                    points.push(Vec2f { x, y });
+            if line.is_empty() {
+                continue;
+            }
+
+            if line.starts_with("#") {
+                if line.starts_with("#sector") {
+                    mode = ChunkType::Sector;
+                } else if line.starts_with("#camera") {
+                    mode = ChunkType::Camera;
+                } else {
+                    return Err(Wmt2LoadingError::UnknownDirective(line.get(1..).unwrap().into()))
                 }
+                continue;
+            }
 
-                // Wall
-                "w" | "wall" => {
-                    let (sx, sy) = elem.next()
-                        .zip(elem.next())
-                        .ok_or(WmtLoadingError::NotEnoughPointCoordinates)?;
-
-                    walls.insert(sx.parse::<u32>().ok()
-                        .zip(sy.parse::<u32>().ok())
-                        .ok_or(WmtLoadingError::NumberParsingError)?
-                        .into()
-                    );
+            match mode {
+                ChunkType::Camera => {
+                    // Parsing camera information in single fucking line
+                    [camera.location.x, camera.location.y, camera.height, camera.rotation] = line
+                        .chars()
+                        .filter(|v| !v.is_whitespace())
+                        .collect::<String>()
+                        .split(',')
+                        .map(|v| v.parse::<f32>())
+                        .collect::<Result<Vec<f32>, _>>()
+                        .map_err(|e| Wmt2LoadingError::FloatParsingError(e))?
+                        .try_into()
+                        .map_err(|_| Wmt2LoadingError::NotEnoughCameraParameters)?;
                 }
-
-                // Sector
-                "s" | "sector" => {
-                    let (sx, sy) = elem.next().zip(elem.next()).ok_or(WmtLoadingError::NotEnoughPointCoordinates)?;
-                    let (floor, ceiling) = sx.parse::<f32>().ok().zip(sy.parse::<f32>().ok()).ok_or(WmtLoadingError::NumberParsingError)?;
-
-                    let point_indices: Vec<u32> = elem
-                        .map(|index_str| index_str.parse::<u32>().ok())
-                        .collect::<Option<Vec<u32>>>().ok_or(WmtLoadingError::NumberParsingError)?;
-
-                    if point_indices.len() < 3 {
-                        return Err(WmtLoadingError::NotEnoughSectorVertices);
+                ChunkType::Sector => {
+                    fn parse_pair(pair: &str) -> Result<(f32, f32), Wmt2LoadingError> {
+                        let mut s = pair.split('/').map(|v| v.parse::<f32>().map_err(|e| Wmt2LoadingError::FloatParsingError(e)));
+                        let (x, y) = s.next().zip(s.next()).ok_or(Wmt2LoadingError::NotEnoughPointCoordinates)?;
+                        Ok((x?, y?))
                     }
 
-                    let walls = point_indices.iter()
-                        .zip({
-                            let mut iter = point_indices.iter().cycle();
-                            iter.next();
-                            iter
-                        })
-                        .map(|(first, second)| {
-                            UnorderedPair::new(*first, *second)
-                        })
-                        .collect::<HashSet<UnorderedPair<u32>>>();
+                    let (sector_name, rest) = line.as_str().split_at(line.find(':').ok_or(Wmt2LoadingError::NoSectorBoundaries)?);
+                    let (sector_bounds, rest) = rest[1..].split_at(rest.find('[').ok_or(Wmt2LoadingError::NoSectorEdgesStart)?);
+                    let (floor, ceiling) = parse_pair(&sector_bounds.trim_end_matches('['))?;
 
-                    sectors.push(SectorData { point_indices, floor, ceiling, walls });
+                    let mut points = Vec::<RawSectorPoint>::new();
+
+                    for pt in rest.trim_end_matches(']').split(',') {
+                        let (point_str, dst_sector_name) = pt
+                            .find(':')
+                            .map(|i| {
+                                let (s, t) = pt.split_at(i);
+                                (s, Some(t[1..].to_string()))
+                            })
+                            .unwrap_or((pt, None));
+
+                        points.push(RawSectorPoint {
+                            base_point: Vec2f::from_tuple(parse_pair(point_str)?),
+                            dst_sector_name,
+                        });
+                    }
+
+                    raw_sectors.insert(sector_name.to_owned(), RawSector {
+                        floor,
+                        ceiling,
+                        points,
+                    });
                 }
-
-                "c" | "camera" => {
-                    let (((scx, scy), scz), sca) = elem.next().zip(elem.next()).zip(elem.next()).zip(elem.next()).ok_or(WmtLoadingError::NotEnoughCameraParameters)?;
-                    (((camera_location.x, camera_location.y), camera_height), camera_rotation) = scx.parse::<f32>().ok()
-                        .zip(scy.parse::<f32>().ok())
-                        .zip(scz.parse::<f32>().ok())
-                        .zip(sca.parse::<f32>().ok())
-                        .ok_or(WmtLoadingError::NumberParsingError)?;
-                }
-
-                _ => return Err(WmtLoadingError::UnknownLineType(line_type.to_string()))
+                _ => {}
             }
         }
 
-        // Parse data parsed from file
-        let sectors = sectors
-            .iter()
-            .enumerate()
-            .map(|(sector_index, sector)| -> Result<Sector, WmtLoadingError> {
-                let points = sector.point_indices.iter()
-                    .map(|index| points
-                        .get(*index as usize)
-                        .map(|v| *v)
-                        .ok_or(WmtLoadingError::InvalidPointIndex(*index))
-                    )
-                    .collect::<Result<Vec<Vec2f>, WmtLoadingError>>()?;
+        let name_to_index = raw_sectors.keys().enumerate().map(|(a, b)| (b.clone(), SectorId::new(a as u32))).collect::<BTreeMap<String, SectorId>>();
 
-                let edges = sector.point_indices.iter()
-                    .zip({
-                        let mut iter = sector.point_indices.iter().cycle();
-                        iter.next();
-                        iter
-                    })
-                    .map(|(first, second)| {
-                        let pair = UnorderedPair::new(*first, *second);
-
-                        // Find adjoint sector
-                        if walls.contains(&pair) {
-                            Ok(EdgeType::Wall)
-                        } else {
-                            let adjoint = sectors.iter()
-                                .enumerate()
-                                .find(|(index, sector)| *index != sector_index && sector.walls.contains(&pair))
-                                .map(|(index, _)| index as u32)
-                                .ok_or(WmtLoadingError::NoAdjointSectorForPortal {
-                                    from_sector: sector_index as u32,
-                                    by_indices: pair.into()
-                                })?;
-
-                            Ok(EdgeType::Portal {
-                                dst_sector_id: SectorId::new(adjoint)
-                            })
-                        }
-                    }).collect::<Result<Vec<_>, WmtLoadingError>>()?;
-
-                // Validate sector bounds
-                if sector.floor > sector.ceiling {
-                    return Err(WmtLoadingError::InvalidSectorBounds { floor: sector.floor, ceiling: sector.ceiling })
-                }
-
-                let mut edge_lines = Sector::build_edges(&points);
-
-                for (line, ty) in edge_lines.iter_mut().zip(edges) {
-                    line.ty = ty;
-                }
-
-                Ok(Sector {
-                    points,
-                    edges: edge_lines,
+        Ok(Map {
+            camera_height: camera.height,
+            camera_location: camera.location,
+            camera_rotation: camera.rotation,
+            sectors: raw_sectors
+                .values()
+                .map(|sector| Ok(Sector {
                     floor: sector.floor,
                     ceiling: sector.ceiling,
-                })
-            })
-            .collect::<Result<Vec<Sector>, WmtLoadingError>>()?;
-
-        Ok(Map { sectors, camera_location, camera_height, camera_rotation })
+                    edges: Edge::loop_from_points(sector.points.iter().map(|v| (v.base_point, EdgeType::Wall)))
+                        .zip(sector.points.iter())
+                        .map(|(mut edge, point)| {
+                            if let Some(dst_name) = point.dst_sector_name.as_ref() {
+                                edge.ty = EdgeType::Portal {
+                                    dst_sector_id: name_to_index.get(dst_name.as_str()).copied().ok_or(Wmt2LoadingError::UnknownSectorReferenced(dst_name.into()))?
+                                };
+                            }
+                            Ok(edge)
+                        })
+                        .collect::<Result<Vec<Edge>, Wmt2LoadingError>>()?,
+                }))
+            .collect::<Result<Vec<Sector>, Wmt2LoadingError>>()?
+        })
     } // fn load_from_wmt
 
     /// Iterator through indexed sectors getting function

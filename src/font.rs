@@ -96,6 +96,10 @@ impl Font {
         let ext = surface.get_extent();
         let mut base_ptr = unsafe { surface.get_data_mut().as_mut_ptr().add(y * stride + x) };
 
+        if y + self.height > ext.h {
+            return;
+        }
+
         for (index, ch_unicode) in line.chars().enumerate() {
             let ch = if ch_unicode.is_ascii() {
                 ch_unicode as u8
